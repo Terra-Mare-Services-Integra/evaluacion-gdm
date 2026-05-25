@@ -6,6 +6,7 @@ const TABLE_BARCOS      = "gdm_barcos";
 const TABLE_ESCENARIOS  = "gdm_escenarios";
 const TABLE_CONSUMOS    = "gdm_consumos";
 const TABLE_TRIPULACION = "gdm_tripulacion";
+const TABLE_PUERTOS     = "gdm_puertos";
 
 const TABS = [
   { id: "barcos",      label: "Barcos",          icon: "🚢" },
@@ -34,7 +35,6 @@ const BARCO_DEFAULT = {
   capex_refit: 0,
   deuda_pct: 0,
   tasa_deuda: 0,
-  cap_alije_m2: 0,
   cap_agua_m3: 0,
   cap_slop_m3: 0,
   cap_lubricantes_drums: 0,
@@ -815,6 +815,251 @@ function TabVariables({ onPrecioChange }) {
   );
 }
 
+
+const PUERTO_DEFAULT = {
+  nombre: "Nuevo Puerto",
+  activo: true,
+  orden: 0,
+  costo_portuario_dia: 0,
+  costo_estiba: 0,
+  costo_agua_m3: 0,
+  costo_slop_m3: 0,
+  costo_bunker_operacion: 0,
+  dist_zona_comun: 0,
+  dist_zona_alfa: 0,
+  dist_zona_delta: 0,
+  costo_indirecto_lumpsum: 0,
+  nota_indirectos: "",
+  calado_max_m: 0,
+  tiene_grua: false,
+  horas_operativas: 24,
+  espera_promedio_hs: 0,
+  restriccion_viento: "",
+};
+
+function TabPuertos() {
+  const [puertos, setPuertos]   = useState([]);
+  const [selIdx, setSelIdx]     = useState(0);
+  const [saving, setSaving]     = useState(false);
+  const [msg, setMsg]           = useState(null);
+  const [loading, setLoading]   = useState(true);
+
+  const showMsg = useCallback((type, text) => {
+    setMsg({ type, text });
+    if (type === "ok") setTimeout(() => setMsg(null), 3000);
+  }, []);
+
+  const loadPuertos = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from(TABLE_PUERTOS).select("*").order("orden");
+      if (error) throw error;
+      if (data.length === 0) {
+        const seeds = [
+          { ...PUERTO_DEFAULT, nombre: "La Plata",     orden: 0, dist_zona_comun: 6,  dist_zona_alfa: 115, dist_zona_delta: 138 },
+          { ...PUERTO_DEFAULT, nombre: "Dock Sud",     orden: 1, dist_zona_comun: 26, dist_zona_alfa: 140, dist_zona_delta: 163 },
+          { ...PUERTO_DEFAULT, nombre: "Buenos Aires", orden: 2, dist_zona_comun: 29, dist_zona_alfa: 143, dist_zona_delta: 165 },
+          { ...PUERTO_DEFAULT, nombre: "Paraná Ports", orden: 3, dist_zona_comun: 51, dist_zona_alfa: 186, dist_zona_delta: 213 },
+        ];
+        const { data: nuevos, error: e2 } = await supabase
+          .from(TABLE_PUERTOS).insert(seeds).select();
+        if (e2) throw e2;
+        setPuertos(nuevos.sort((a, b) => a.orden - b.orden));
+        setSelIdx(0);
+      } else {
+        setPuertos(data);
+        setSelIdx(0);
+      }
+    } catch (e) {
+      showMsg("err", `Error al cargar puertos: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMsg]);
+
+  useEffect(() => { loadPuertos(); }, [loadPuertos]);
+
+  const set = useCallback((k, v) => {
+    setPuertos(prev => prev.map((p, i) => i === selIdx ? { ...p, [k]: v } : p));
+  }, [selIdx]);
+
+  const guardar = async () => {
+    const puerto = puertos[selIdx];
+    if (!puerto) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from(TABLE_PUERTOS).update({
+        nombre: puerto.nombre,
+        activo: puerto.activo,
+        costo_portuario_dia: puerto.costo_portuario_dia,
+        costo_estiba: puerto.costo_estiba,
+        costo_agua_m3: puerto.costo_agua_m3,
+        costo_slop_m3: puerto.costo_slop_m3,
+        costo_bunker_operacion: puerto.costo_bunker_operacion,
+        dist_zona_comun: puerto.dist_zona_comun,
+        dist_zona_alfa: puerto.dist_zona_alfa,
+        dist_zona_delta: puerto.dist_zona_delta,
+        costo_indirecto_lumpsum: puerto.costo_indirecto_lumpsum,
+        nota_indirectos: puerto.nota_indirectos,
+        calado_max_m: puerto.calado_max_m,
+        tiene_grua: puerto.tiene_grua,
+        horas_operativas: puerto.horas_operativas,
+        espera_promedio_hs: puerto.espera_promedio_hs,
+        restriccion_viento: puerto.restriccion_viento,
+      }).eq("id", puerto.id);
+      if (error) throw error;
+      showMsg("ok", "Puerto guardado correctamente.");
+    } catch (e) {
+      showMsg("err", `No se pudo guardar: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const nuevoPuerto = async () => {
+    if (puertos.length >= 5) return;
+    setSaving(true);
+    try {
+      const { data, error } = await supabase
+        .from(TABLE_PUERTOS)
+        .insert({ ...PUERTO_DEFAULT, nombre: `Puerto ${puertos.length + 1}`, orden: puertos.length })
+        .select().single();
+      if (error) throw error;
+      setPuertos(prev => { const u = [...prev, data]; setSelIdx(u.length - 1); return u; });
+    } catch (e) {
+      showMsg("err", `No se pudo crear el puerto: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const eliminar = async () => {
+    const puerto = puertos[selIdx];
+    if (!puerto) return;
+    if (!window.confirm(`¿Eliminar "${puerto.nombre}"? Esta acción no se puede deshacer.`)) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from(TABLE_PUERTOS).delete().eq("id", puerto.id);
+      if (error) throw error;
+      setPuertos(prev => { const u = prev.filter((_, i) => i !== selIdx); setSelIdx(Math.max(0, selIdx - 1)); return u; });
+      showMsg("ok", "Puerto eliminado.");
+    } catch (e) {
+      showMsg("err", `No se pudo eliminar: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="empty-state">Cargando puertos...</div>;
+
+  const puerto = puertos[selIdx];
+  if (!puerto) return <div className="empty-state">No hay puertos cargados.</div>;
+
+  return (
+    <div>
+      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+
+      <div className="selector">
+        {puertos.map((p, i) => (
+          <button key={p.id} className={`sel-btn ${i === selIdx ? "on" : ""}`} onClick={() => setSelIdx(i)}>
+            🏗️ {p.nombre}
+          </button>
+        ))}
+        {puertos.length < 5 && (
+          <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}>+ Nuevo puerto</button>
+        )}
+      </div>
+
+      <div className="g2">
+        <div className="card">
+          <div className="sec">① Identidad</div>
+          <div className="g2">
+            <div className="campo"><div className="campo-label">Nombre</div>
+              <input className="campo-input" value={puerto.nombre || ""} onChange={e => set("nombre", e.target.value)} /></div>
+            <div className="campo"><div className="campo-label">Estado</div>
+              <select className="campo-input" value={puerto.activo ? "true" : "false"} onChange={e => set("activo", e.target.value === "true")}>
+                <option value="true">Activo</option>
+                <option value="false">Inactivo</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="sec">② Distancias a zonas de trabajo (nm)</div>
+          <div className="g3">
+            <div className="campo"><div className="campo-label">Zona Común</div>
+              <input className="campo-input" type="number" value={puerto.dist_zona_comun ?? 0} onChange={e => set("dist_zona_comun", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Zona Alfa</div>
+              <input className="campo-input" type="number" value={puerto.dist_zona_alfa ?? 0} onChange={e => set("dist_zona_alfa", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Zona Delta</div>
+              <input className="campo-input" type="number" value={puerto.dist_zona_delta ?? 0} onChange={e => set("dist_zona_delta", parseNum(e.target.value))} /></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="g2">
+        <div className="card">
+          <div className="sec">③ Costos operativos (USD)</div>
+          <div className="g2">
+            <div className="campo"><div className="campo-label">Costo portuario (por día)</div>
+              <input className="campo-input" type="number" value={puerto.costo_portuario_dia ?? 0} onChange={e => set("costo_portuario_dia", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Costo estiba (por operación)</div>
+              <input className="campo-input" type="number" value={puerto.costo_estiba ?? 0} onChange={e => set("costo_estiba", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Agua (USD/m³)</div>
+              <input className="campo-input" type="number" value={puerto.costo_agua_m3 ?? 0} onChange={e => set("costo_agua_m3", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Slop (USD/m³)</div>
+              <input className="campo-input" type="number" value={puerto.costo_slop_m3 ?? 0} onChange={e => set("costo_slop_m3", parseNum(e.target.value))} /></div>
+            <div className="campo"><div className="campo-label">Bunker (por operación)</div>
+              <input className="campo-input" type="number" value={puerto.costo_bunker_operacion ?? 0} onChange={e => set("costo_bunker_operacion", parseNum(e.target.value))} /></div>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="sec">④ Costos indirectos</div>
+          <div className="campo"><div className="campo-label">Lump sum mensual (USD)</div>
+            <input className="campo-input" type="number" value={puerto.costo_indirecto_lumpsum ?? 0} onChange={e => set("costo_indirecto_lumpsum", parseNum(e.target.value))} /></div>
+          <div className="campo" style={{marginTop:6}}><div className="campo-label">Descripción / nota</div>
+            <textarea className="campo-input" rows={3} value={puerto.nota_indirectos || ""}
+              onChange={e => set("nota_indirectos", e.target.value)}
+              style={{resize:"vertical",fontFamily:"var(--sans)",fontSize:12}} /></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="sec">⑤ Restricciones y condiciones operativas</div>
+        <div className="g4">
+          <div className="campo"><div className="campo-label">Calado máx. (m)</div>
+            <input className="campo-input" type="number" step="0.1" value={puerto.calado_max_m ?? 0} onChange={e => set("calado_max_m", parseNum(e.target.value))} /></div>
+          <div className="campo"><div className="campo-label">Horas operativas / día</div>
+            <input className="campo-input" type="number" value={puerto.horas_operativas ?? 24} onChange={e => set("horas_operativas", parseNum(e.target.value))} /></div>
+          <div className="campo"><div className="campo-label">Espera promedio (hs)</div>
+            <input className="campo-input" type="number" step="0.5" value={puerto.espera_promedio_hs ?? 0} onChange={e => set("espera_promedio_hs", parseNum(e.target.value))} /></div>
+          <div className="campo"><div className="campo-label">Grúa disponible</div>
+            <select className="campo-input" value={puerto.tiene_grua ? "true" : "false"} onChange={e => set("tiene_grua", e.target.value === "true")}>
+              <option value="false">No</option>
+              <option value="true">Sí</option>
+            </select>
+          </div>
+        </div>
+        <div className="campo" style={{marginTop:4}}><div className="campo-label">Restricciones de viento / clima</div>
+          <input className="campo-input" value={puerto.restriccion_viento || ""} onChange={e => set("restriccion_viento", e.target.value)}
+            placeholder="Ej: Operación suspendida con viento > 25 kn" /></div>
+      </div>
+
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+        {puertos.length > 1 && (
+          <button className="btn btn-danger" onClick={eliminar} disabled={saving}>Eliminar puerto</button>
+        )}
+        <button className="btn btn-primary" onClick={guardar} disabled={saving}>
+          {saving ? "Guardando..." : "Guardar puerto"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Pronto({ label }) {
   return (
     <div className="pronto">
@@ -898,7 +1143,7 @@ export default function App() {
       </nav>
       <div className="page">
         {tab === "barcos"      && <TabBarcos precioVlsfo={precioVlsfo} />}
-        {tab === "puertos"     && <Pronto label="Puertos — próximamente" />}
+        {tab === "puertos"     && <TabPuertos />}
         {tab === "servicios"   && <Pronto label="Servicios — próximamente" />}
         {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} />}
         {tab === "pl"          && <Pronto label="P&L — próximamente" />}
