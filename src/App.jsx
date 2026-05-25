@@ -259,87 +259,74 @@ function BloqueConsumos({ barcoId, precioVlsfo }) {
       {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
 
       <div style={{ overflowX: "auto" }}>
-        <table className="data-table">
+        <table className="data-table" style={{tableLayout:"fixed"}}>
+          <colgroup>
+            <col style={{width:70}} /><col style={{width:130}} /><col style={{width:130}} />
+            <col style={{width:110}} /><col style={{width:110}} /><col style={{width:110}} />
+          </colgroup>
           <thead>
             <tr>
-              <th>Velocidad (kn)</th>
-              <th>Consumo Lastre (Tn/día)</th>
-              <th>Consumo En Carga (Tn/día)</th>
-              <th>Lub. % sobre comb.</th>
-              <th>Lub. Lastre (Tn/día)</th>
-              <th>Lub. En Carga (Tn/día)</th>
+              <th>Vel. (kn)</th>
+              <th>Lastre (Tn/día)</th>
+              <th>En carga (Tn/día)</th>
+              <th>Lub. %</th>
+              <th>Lub. Lastre</th>
+              <th>Lub. En carga</th>
             </tr>
           </thead>
           <tbody>
             {consumos.map((c, i) => (
               <tr key={c.id}>
                 <td>
-                  <input className="tbl-input" type="number" value={c.velocidad}
-                    onChange={e => setConsumo(i, "velocidad", e.target.value)} style={{width:60}} />
+                  <input className="tbl-input" type="number" step="1" value={c.velocidad}
+                    onChange={e => setConsumo(i, "velocidad", e.target.value)} />
                 </td>
                 <td>
-                  <input className="tbl-input" type="number" step="0.1" value={c.consumo_lastre}
+                  <input className="tbl-input" type="number" step="0.1" value={parseFloat(c.consumo_lastre).toFixed(1)}
                     onChange={e => setConsumo(i, "consumo_lastre", e.target.value)} />
                 </td>
                 <td>
-                  <input className="tbl-input" type="number" step="0.1" value={c.consumo_carga}
+                  <input className="tbl-input" type="number" step="0.1" value={parseFloat(c.consumo_carga).toFixed(1)}
                     onChange={e => setConsumo(i, "consumo_carga", e.target.value)} />
                 </td>
                 <td>
-                  <input className="tbl-input" type="number" step="0.1" value={c.lubricante_pct}
-                    onChange={e => setConsumo(i, "lubricante_pct", e.target.value)} />
-                  <span style={{fontSize:9,color:"var(--muted)",marginLeft:2}}>%</span>
+                  <div style={{display:"flex",alignItems:"center",gap:3}}>
+                    <input className="tbl-input" type="number" step="0.1" value={parseFloat(c.lubricante_pct).toFixed(1)}
+                      onChange={e => setConsumo(i, "lubricante_pct", e.target.value)} style={{flex:1}} />
+                    <span style={{fontSize:9,color:"var(--muted)",flexShrink:0}}>%</span>
+                  </div>
                 </td>
                 <td>
                   <input className="tbl-formula" readOnly
-                    value={fmtDec(c.consumo_lastre * (c.lubricante_pct / 100), 4)} />
+                    value={(Math.ceil(c.consumo_lastre * (c.lubricante_pct / 100) * 10) / 10).toFixed(1)} />
                 </td>
                 <td>
                   <input className="tbl-formula" readOnly
-                    value={fmtDec(c.consumo_carga * (c.lubricante_pct / 100), 4)} />
+                    value={(Math.ceil(c.consumo_carga * (c.lubricante_pct / 100) * 10) / 10).toFixed(1)} />
                 </td>
               </tr>
             ))}
             <tr className="puerto-row">
-              <td>En puerto</td>
+              <td style={{fontWeight:600,fontSize:10}}>En puerto</td>
               <td colSpan={2}>
-                <input className="tbl-input" type="number" step="0.01" value={consumoPuerto}
+                <input className="tbl-input" type="number" step="0.1" value={parseFloat(consumoPuerto).toFixed(1)}
                   onChange={e => setConsumoPuerto(parseNum(e.target.value))} />
               </td>
               <td>
-                <input className="tbl-input" type="number" step="0.1" value={lubPuertoPct}
-                  onChange={e => setLubPuertoPct(parseNum(e.target.value))} />
-                <span style={{fontSize:9,color:"var(--muted)",marginLeft:2}}>%</span>
+                <div style={{display:"flex",alignItems:"center",gap:3}}>
+                  <input className="tbl-input" type="number" step="0.1" value={parseFloat(lubPuertoPct).toFixed(1)}
+                    onChange={e => setLubPuertoPct(parseNum(e.target.value))} style={{flex:1}} />
+                  <span style={{fontSize:9,color:"var(--muted)",flexShrink:0}}>%</span>
+                </div>
               </td>
               <td colSpan={2}>
                 <input className="tbl-formula" readOnly
-                  value={fmtDec(consumoPuerto * (lubPuertoPct / 100), 4)} />
+                  value={(Math.ceil(consumoPuerto * (lubPuertoPct / 100) * 10) / 10).toFixed(1)} />
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-
-      {(() => {
-        const midIdx = Math.floor(consumos.length / 2);
-        const midConsumo = consumos[midIdx] || { consumo_lastre: 0, consumo_carga: 0 };
-        return (
-          <div className="costo-pills" style={{marginTop:12}}>
-            <div className="costo-pill">
-              <div className="costo-pill-v">{fmtUSD(midConsumo.consumo_lastre * pvlsfo)}</div>
-              <div className="costo-pill-l">Costo comb. lastre @ vel. media</div>
-            </div>
-            <div className="costo-pill">
-              <div className="costo-pill-v">{fmtUSD(midConsumo.consumo_carga * pvlsfo)}</div>
-              <div className="costo-pill-l">Costo comb. en carga @ vel. media</div>
-            </div>
-            <div className="costo-pill">
-              <div className="costo-pill-v">{fmtUSD(consumoPuerto * pvlsfo)}</div>
-              <div className="costo-pill-l">Costo comb. en puerto/día</div>
-            </div>
-          </div>
-        );
-      })()}
 
       <p className="nota">* Precio VLSFO tomado de Variables Globales ({fmtUSD(pvlsfo)}/Tn)</p>
 
@@ -358,11 +345,6 @@ function BloqueCapacidades({ barco, set }) {
     <div className="card">
       <div className="sec">④ Capacidades de carga</div>
       <div className="g4">
-        <div className="campo">
-          <div className="campo-label">Alije (m²)</div>
-          <input className="campo-input" type="number" value={barco.cap_alije_m2 ?? 0}
-            onChange={e => set("cap_alije_m2", parseNum(e.target.value))} />
-        </div>
         <div className="campo">
           <div className="campo-label">Agua (m³)</div>
           <input className="campo-input" type="number" value={barco.cap_agua_m3 ?? 0}
