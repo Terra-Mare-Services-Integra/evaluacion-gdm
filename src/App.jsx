@@ -782,7 +782,7 @@ function TabBarcos({ precioVlsfo }) {
 }
 
 // ─── TAB VARIABLES GLOBALES ────────────────────────────────────────────────
-function TabVariables({ onPrecioChange }) {
+function TabVariables({ onPrecioChange, onCrecimientoChange, onLubricanteChange }) {
   const [vars, setVars]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving]   = useState(false);
@@ -803,6 +803,10 @@ function TabVariables({ onPrecioChange }) {
         setVars(data || []);
         const vlsfo = data?.find(v => v.clave === "precio_vlsfo");
         if (vlsfo && onPrecioChange) onPrecioChange(vlsfo.valor);
+        const crec = data?.find(v => v.clave === "crecimiento_operaciones_pct");
+        if (crec && onCrecimientoChange) onCrecimientoChange(crec.valor);
+        const lub = data?.find(v => v.clave === "precio_lubricante");
+        if (lub && onLubricanteChange) onLubricanteChange(lub.valor);
       } catch (e) {
         showMsg("err", `Error al cargar variables: ${e.message}`);
       } finally {
@@ -826,6 +830,10 @@ function TabVariables({ onPrecioChange }) {
       }
       const vlsfo = vars.find(v => v.clave === "precio_vlsfo");
       if (vlsfo && onPrecioChange) onPrecioChange(vlsfo.valor);
+      const crec = vars.find(v => v.clave === "crecimiento_operaciones_pct");
+      if (crec && onCrecimientoChange) onCrecimientoChange(crec.valor);
+      const lub = vars.find(v => v.clave === "precio_lubricante");
+      if (lub && onLubricanteChange) onLubricanteChange(lub.valor);
       showMsg("ok", "Variables guardadas.");
     } catch (e) {
       showMsg("err", `Error al guardar: ${e.message}`);
@@ -1429,16 +1437,15 @@ function TabServicios() {
 
 
 // ─── MOTOR DE CÁLCULO ─────────────────────────────────────────────────────
-function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, anios = 7) {
+function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, anios = 7, crecimientoPct = 0, precioLubricante = 2200) {
   if (!barco || !puerto) return null;
 
   const DIAS_ANIO = 365;
   const resultado = [];
+  const tasaCrecimiento = crecimientoPct / 100;
 
-  // Velocidad crucero para calcular días navegación
   const velCrucero = barco.velocidad_crucero || 8;
 
-  // Costo combustible por hora navegando (usando consumo de la fila más cercana a vel crucero)
   const filaVel = consumos.length > 0
     ? consumos.reduce((prev, curr) =>
         Math.abs(curr.velocidad - velCrucero) < Math.abs(prev.velocidad - velCrucero) ? curr : prev)
@@ -1450,16 +1457,17 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
   const lubPct     = (filaVel?.lubricante_pct || 3) / 100;
   const lubPuertoPct = (barco.lubricante_pct_puerto || 3) / 100;
   const pvlsfo     = precioVlsfo || 1000;
+  const plub       = precioLubricante || 2200;
 
-  // Costo diario combustible
+  // Costo diario combustible (VLSFO)
   const costoCombNavLastre = consLastre * pvlsfo;
   const costoCombNavCarga  = consCarga  * pvlsfo;
   const costoCombPuerto    = consPuerto * pvlsfo;
 
-  // Costo diario lubricante
-  const costoLubNavLastre = consLastre * lubPct * pvlsfo;
-  const costoLubNavCarga  = consCarga  * lubPct * pvlsfo;
-  const costoLubPuerto    = consPuerto * lubPuertoPct * pvlsfo;
+  // Costo diario lubricante (precio lubricante, no VLSFO)
+  const costoLubNavLastre = consLastre * lubPct * plub;
+  const costoLubNavCarga  = consCarga  * lubPct * plub;
+  const costoLubPuerto    = consPuerto * lubPuertoPct * plub;
 
   // Tripulación diaria
   const tripNavegando = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0) * (r.costo_dia_navegando || 0), 0);
@@ -1491,7 +1499,8 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
     let diasOperativos = 0;
 
     for (const srv of servicios.filter(s => s.activo)) {
-      const ops = srv.operaciones_anio || 0;
+      const opsBase = srv.operaciones_anio || 0;
+      const ops = opsBase * Math.pow(1 + tasaCrecimiento, anio - 1);
       if (ops === 0) continue;
 
       // Distancia al sitio (ida)
@@ -1582,7 +1591,7 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
 
   // TIR / VAN / MOIC
   const capexInicial = (barco.precio_compra || 0) * (1 + (barco.arancel_pct || 0) / 100) + (barco.capex_refit || 0);
-  const flujos = resultado.map((r, i) => r.fco + (i === anios - 1 ? r.valorResidual : 0));
+  const flujos = resultado.map((r, i) => r.fco + (i === resultado.length - 1 ? r.valorResidual : 0));
   const tir = calcTIR([-capexInicial, ...flujos]);
   const van = calcVAN([-capexInicial, ...flujos], 0.12);
   const totalRetornado = flujos.reduce((s, f) => s + f, 0);
@@ -1613,7 +1622,7 @@ function calcVAN(flujos, tasa) {
 }
 
 // ─── TAB P&L ───────────────────────────────────────────────────────────────
-function TabPL({ precioVlsfo }) {
+function TabPL({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
   const [consumos, setConsumos]   = useState([]);
@@ -1671,13 +1680,13 @@ function TabPL({ precioVlsfo }) {
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo) : null;
+  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, 7, crecimientoPct, precioLubricante) : null;
 
   return (
     <div>
       {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
 
-      {/* Selectores */}
+      {/* Selectores */
       <div className="card" style={{marginBottom:12}}>
         <div className="g2">
           <div className="campo">
@@ -1771,7 +1780,7 @@ function TabPL({ precioVlsfo }) {
 }
 
 // ─── TAB CASHFLOW ──────────────────────────────────────────────────────────
-function TabCashflow({ precioVlsfo }) {
+function TabCashflow({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
   const [consumos, setConsumos]   = useState([]);
@@ -1829,7 +1838,7 @@ function TabCashflow({ precioVlsfo }) {
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo) : null;
+  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, 7, crecimientoPct, precioLubricante) : null;
 
   // Saldo acumulado calculado fuera del render para evitar mutación en JSX
   const saldosAcum = pl ? pl.anios.reduce((acc, a) => {
@@ -1962,6 +1971,234 @@ function TabCashflow({ precioVlsfo }) {
   );
 }
 
+
+const METRICAS = [
+  { id: "tir",          label: "TIR",            fmt: v => v !== null ? `${(v * 100).toFixed(1)}%` : "N/A" },
+  { id: "van",          label: "VAN (12%)",       fmt: v => fmtCompact(v) },
+  { id: "moic",         label: "MOIC",            fmt: v => `${v.toFixed(2)}x` },
+  { id: "ebitda1",      label: "EBITDA año 1",    fmt: v => fmtCompact(v) },
+  { id: "resultadoNeto1", label: "Resultado neto año 1", fmt: v => fmtCompact(v) },
+  { id: "margenEbitda1",  label: "Margen EBITDA",  fmt: v => `${(v * 100).toFixed(1)}%` },
+];
+
+function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
+  const [barcos, setBarcos]       = useState([]);
+  const [puertos, setPuertos]     = useState([]);
+  const [servicios, setServicios] = useState([]);
+  const [consumosPorBarco, setConsumosPorBarco]     = useState({});
+  const [tripulacionPorBarco, setTripulacionPorBarco] = useState({});
+  const [loading, setLoading]     = useState(true);
+  const [msg, setMsg]             = useState(null);
+  const [metrica, setMetrica]     = useState("tir");
+  const [maxAnios, setMaxAnios]   = useState(7);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const [rb, rp, rs] = await Promise.all([
+          supabase.from(TABLE_BARCOS).select("*").order("created_at"),
+          supabase.from(TABLE_PUERTOS).select("*").order("orden"),
+          supabase.from(TABLE_SERVICIOS).select("*").order("orden"),
+        ]);
+        if (rb.error) throw rb.error;
+        if (rp.error) throw rp.error;
+        if (rs.error) throw rs.error;
+
+        const barcosData = rb.data || [];
+        setBarcos(barcosData);
+        setPuertos(rp.data || []);
+        setServicios(rs.data || []);
+
+        // Cargar consumos y tripulación de todos los barcos
+        const consumosMap = {};
+        const tripMap = {};
+        await Promise.all(barcosData.map(async (b) => {
+          const [rc, rt] = await Promise.all([
+            supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", b.id).order("orden"),
+            supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id", b.id).order("orden"),
+          ]);
+          consumosMap[b.id] = rc.data || [];
+          tripMap[b.id]     = rt.data || [];
+        }));
+        setConsumosPorBarco(consumosMap);
+        setTripulacionPorBarco(tripMap);
+      } catch (e) {
+        setMsg({ type: "err", text: `Error al cargar datos: ${e.message}` });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  if (loading) return <div className="empty-state">Calculando combinaciones...</div>;
+
+  // Calcular todas las combinaciones barco × puerto
+  const combinaciones = [];
+  for (const barco of barcos) {
+    for (const puerto of puertos) {
+      const consumos   = consumosPorBarco[barco.id] || [];
+      const tripulacion = tripulacionPorBarco[barco.id] || [];
+      const pl = calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, maxAnios, crecimientoPct, precioLubricante);
+      if (!pl) continue;
+      combinaciones.push({
+        barco,
+        puerto,
+        tir:            pl.tir,
+        van:            pl.van,
+        moic:           pl.moic,
+        ebitda1:        pl.anios[0]?.ebitda || 0,
+        resultadoNeto1: pl.anios[0]?.resultadoNeto || 0,
+        margenEbitda1:  pl.anios[0]?.margenEbitda || 0,
+        capexInicial:   pl.capexInicial,
+      });
+    }
+  }
+
+  // Ordenar por métrica seleccionada
+  const sorted = [...combinaciones].sort((a, b) => {
+    const va = a[metrica] ?? -Infinity;
+    const vb = b[metrica] ?? -Infinity;
+    return vb - va;
+  });
+
+  const metricaMeta = METRICAS.find(m => m.id === metrica);
+  const mejorVal = sorted.length > 0 ? sorted[0][metrica] : null;
+  const peorVal  = sorted.length > 0 ? sorted[sorted.length - 1][metrica] : null;
+
+  const getColor = (val) => {
+    if (val === null || mejorVal === null || peorVal === null || mejorVal === peorVal) return "var(--navy)";
+    const pct = (val - peorVal) / (mejorVal - peorVal);
+    if (pct > 0.66) return "var(--green)";
+    if (pct > 0.33) return "var(--gold)";
+    return "var(--red)";
+  };
+
+  return (
+    <div>
+      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+
+      {/* Controles */}
+      <div className="card" style={{marginBottom:12}}>
+        <div className="g2">
+          <div className="campo">
+            <div className="campo-label">Métrica de ranking</div>
+            <select className="campo-input" value={metrica} onChange={e => setMetrica(e.target.value)}>
+              {METRICAS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
+          <div className="campo">
+            <div className="campo-label">Evaluar hasta año</div>
+            <select className="campo-input" value={maxAnios} onChange={e => setMaxAnios(+e.target.value)}>
+              {[1,2,3,4,5,6,7].map(n => <option key={n} value={n}>Año {n}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {combinaciones.length === 0 && (
+        <div className="empty-state">No hay combinaciones disponibles. Cargá al menos un barco y un puerto.</div>
+      )}
+
+      {combinaciones.length > 0 && (
+        <>
+          {/* Podio top 3 */}
+          {sorted.length >= 1 && (
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              {sorted.slice(0, Math.min(3, sorted.length)).map((c, i) => (
+                <div key={`${c.barco.id}-${c.puerto.id}`} style={{
+                  flex:1,background: i === 0 ? "var(--navy)" : "var(--surface)",
+                  border:`1px solid ${i === 0 ? "var(--navy)" : "var(--border)"}`,
+                  borderRadius:10,padding:"14px 16px",
+                }}>
+                  <div style={{fontSize:9,color: i === 0 ? "rgba(255,255,255,.5)" : "var(--muted)",fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>
+                    {i === 0 ? "🥇 Mejor" : i === 1 ? "🥈 2do" : "🥉 3ro"} · {metricaMeta?.label}
+                  </div>
+                  <div style={{fontSize:20,fontWeight:800,fontFamily:"var(--mono)",color: i === 0 ? "#fff" : "var(--green)",marginBottom:4}}>
+                    {metricaMeta?.fmt(c[metrica])}
+                  </div>
+                  <div style={{fontSize:11,fontWeight:700,color: i === 0 ? "rgba(255,255,255,.8)" : "var(--navy)"}}>
+                    🚢 {c.barco.nombre}
+                  </div>
+                  <div style={{fontSize:10,color: i === 0 ? "rgba(255,255,255,.5)" : "var(--muted)"}}>
+                    🏗️ {c.puerto.nombre}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Tabla completa */}
+          <div className="card">
+            <div className="sec">Todas las combinaciones — ordenadas por {metricaMeta?.label}</div>
+            <div style={{overflowX:"auto"}}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{textAlign:"center",width:40}}>#</th>
+                    <th style={{textAlign:"left"}}>Barco</th>
+                    <th style={{textAlign:"left"}}>Puerto</th>
+                    <th style={{textAlign:"right"}}>TIR</th>
+                    <th style={{textAlign:"right"}}>VAN</th>
+                    <th style={{textAlign:"right"}}>MOIC</th>
+                    <th style={{textAlign:"right"}}>EBITDA año 1</th>
+                    <th style={{textAlign:"right"}}>Res. Neto año 1</th>
+                    <th style={{textAlign:"right"}}>Margen</th>
+                    <th style={{textAlign:"right"}}>CAPEX</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorted.map((c, i) => (
+                    <tr key={`${c.barco.id}-${c.puerto.id}`}
+                      style={{background: i === 0 ? "#EEF2F7" : "transparent"}}
+                    >
+                      <td style={{textAlign:"center",fontWeight:700,color:"var(--muted)",fontSize:10}}>
+                        {i + 1}
+                      </td>
+                      <td style={{fontWeight:600}}>🚢 {c.barco.nombre}</td>
+                      <td style={{color:"var(--muted)"}}>🏗️ {c.puerto.nombre}</td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "tir" ? 800 : 400,
+                        color: metrica === "tir" ? getColor(c.tir) : c.tir !== null && c.tir > 0.12 ? "var(--green)" : "var(--red)"}}>
+                        {c.tir !== null ? `${(c.tir * 100).toFixed(1)}%` : "N/A"}
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "van" ? 800 : 400,
+                        color: metrica === "van" ? getColor(c.van) : c.van > 0 ? "var(--green)" : "var(--red)"}}>
+                        {fmtCompact(c.van)}
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "moic" ? 800 : 400,
+                        color: metrica === "moic" ? getColor(c.moic) : "var(--navy)"}}>
+                        {c.moic.toFixed(2)}x
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "ebitda1" ? 800 : 400,
+                        color: metrica === "ebitda1" ? getColor(c.ebitda1) : c.ebitda1 > 0 ? "var(--green)" : "var(--red)"}}>
+                        {fmtCompact(c.ebitda1)}
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "resultadoNeto1" ? 800 : 400,
+                        color: metrica === "resultadoNeto1" ? getColor(c.resultadoNeto1) : c.resultadoNeto1 > 0 ? "var(--green)" : "var(--red)"}}>
+                        {fmtCompact(c.resultadoNeto1)}
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight: metrica === "margenEbitda1" ? 800 : 400,
+                        color: metrica === "margenEbitda1" ? getColor(c.margenEbitda1) : "var(--navy)"}}>
+                        {(c.margenEbitda1 * 100).toFixed(1)}%
+                      </td>
+                      <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--muted)"}}>
+                        {fmtCompact(c.capexInicial)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
+              * Crecimiento operaciones: {crecimientoPct}% anual · VLSFO: {fmtCompact(precioVlsfo)}/Tn · Evaluado a {maxAnios} {maxAnios === 1 ? "año" : "años"}
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Pronto({ label }) {
   return (
     <div className="pronto">
@@ -2011,7 +2248,11 @@ export default function App() {
   const [loading, setLoading]     = useState(true);
   const [tab, setTab]             = useState("barcos");
   const [precioVlsfo, setPrecioVlsfo] = useState(1000);
+  const [crecimientoPct, setCrecimientoPct] = useState(4);
+  const [precioLubricante, setPrecioLubricante] = useState(2200);
   const handlePrecioChange = useCallback((precio) => setPrecioVlsfo(precio), []);
+  const handleCrecimientoChange = useCallback((pct) => setCrecimientoPct(pct), []);
+  const handleLubricanteChange = useCallback((precio) => setPrecioLubricante(precio), []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -2047,10 +2288,10 @@ export default function App() {
         {tab === "barcos"      && <TabBarcos precioVlsfo={precioVlsfo} />}
         {tab === "puertos"     && <TabPuertos />}
         {tab === "servicios"   && <TabServicios />}
-        {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} />}
-        {tab === "pl"          && <TabPL precioVlsfo={precioVlsfo} />}
-        {tab === "cashflow"    && <TabCashflow precioVlsfo={precioVlsfo} />}
-        {tab === "comparacion" && <Pronto label="Comparación — próximamente" />}
+        {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} onCrecimientoChange={handleCrecimientoChange} onLubricanteChange={handleLubricanteChange} />}
+        {tab === "pl"          && <TabPL precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
+        {tab === "cashflow"    && <TabCashflow precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
+        {tab === "comparacion" && <TabComparacion precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
       </div>
     </>
   );
