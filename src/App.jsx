@@ -169,6 +169,14 @@ const parseNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
 const fmt    = (n) => (n ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const fmtUSD = (n) => `$${fmt(n)}`;
 const fmtDec = (n, d = 2) => (n ?? 0).toFixed(d);
+const fmtCompact = (n) => {
+  if (n === null || n === undefined) return "—";
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000)     return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+};
 const calcOpexFijo = (b) =>
   (b.opex_mantenimiento || 0) + (b.opex_seguros || 0) +
   (b.opex_comunicaciones || 0) + (b.opex_prefectura || 0) + (b.opex_admin || 0) +
@@ -1697,10 +1705,10 @@ function TabPL({ precioVlsfo }) {
           <div className="kpis" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
             {[
               { label: "TIR", val: pl.tir !== null ? `${(pl.tir * 100).toFixed(1)}%` : "N/A", cls: pl.tir !== null && pl.tir > 0.12 ? "green" : pl.tir !== null ? "red" : "" },
-              { label: "VAN (12%)", val: fmtUSD(pl.van), cls: pl.van > 0 ? "green" : "red" },
+              { label: "VAN (12%)", val: fmtCompact(pl.van), cls: pl.van > 0 ? "green" : "red" },
               { label: "MOIC", val: `${pl.moic.toFixed(2)}x`, cls: pl.moic > 1.5 ? "green" : "" },
-              { label: "CAPEX inicial", val: fmtUSD(pl.capexInicial), cls: "" },
-              { label: "EBITDA año 1", val: fmtUSD(pl.anios[0]?.ebitda), cls: pl.anios[0]?.ebitda > 0 ? "green" : "red" },
+              { label: "CAPEX inicial", val: fmtCompact(pl.capexInicial), cls: "" },
+              { label: "EBITDA año 1", val: fmtCompact(pl.anios[0]?.ebitda), cls: pl.anios[0]?.ebitda > 0 ? "green" : "red" },
               { label: "Margen EBITDA", val: `${((pl.anios[0]?.margenEbitda || 0) * 100).toFixed(1)}%`, cls: "" },
             ].map(k => (
               <div key={k.label} style={{flex:1,minWidth:90,background: k.cls === "green" ? "var(--green-bg)" : k.cls === "red" ? "var(--red-bg)" : "var(--bg)",border:`1px solid ${k.cls === "green" ? "var(--green-border)" : k.cls === "red" ? "var(--red-border)" : "var(--border)"}`,borderRadius:8,padding:"10px 12px"}}>
@@ -1858,9 +1866,9 @@ function TabCashflow({ precioVlsfo }) {
           <div className="kpis" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
             {[
               { label: "TIR", val: pl.tir !== null ? `${(pl.tir * 100).toFixed(1)}%` : "N/A", cls: pl.tir !== null && pl.tir > 0.12 ? "green" : pl.tir !== null ? "red" : "" },
-              { label: "VAN (12%)", val: fmtUSD(pl.van), cls: pl.van > 0 ? "green" : "red" },
+              { label: "VAN (12%)", val: fmtCompact(pl.van), cls: pl.van > 0 ? "green" : "red" },
               { label: "MOIC", val: `${pl.moic.toFixed(2)}x`, cls: pl.moic > 1.5 ? "green" : "" },
-              { label: "CAPEX inicial", val: fmtUSD(pl.capexInicial), cls: "" },
+              { label: "CAPEX inicial", val: fmtCompact(pl.capexInicial), cls: "" },
             ].map(k => (
               <div key={k.label} style={{flex:1,minWidth:90,background: k.cls === "green" ? "var(--green-bg)" : k.cls === "red" ? "var(--red-bg)" : "var(--bg)",border:`1px solid ${k.cls === "green" ? "var(--green-border)" : k.cls === "red" ? "var(--red-border)" : "var(--border)"}`,borderRadius:8,padding:"10px 12px"}}>
                 <div style={{fontSize:18,fontWeight:800,fontFamily:"var(--mono)",color: k.cls === "green" ? "var(--green)" : k.cls === "red" ? "var(--red)" : "var(--navy)"}}>{k.val}</div>
