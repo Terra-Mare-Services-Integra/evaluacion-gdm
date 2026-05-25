@@ -1686,7 +1686,7 @@ function TabPL({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
     <div>
       {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
 
-      {/* Selectores */
+      {/* Selectores */}
       <div className="card" style={{marginBottom:12}}>
         <div className="g2">
           <div className="campo">
