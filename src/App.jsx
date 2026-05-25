@@ -7,6 +7,7 @@ const TABLE_ESCENARIOS  = "gdm_escenarios";
 const TABLE_CONSUMOS    = "gdm_consumos";
 const TABLE_TRIPULACION = "gdm_tripulacion";
 const TABLE_PUERTOS     = "gdm_puertos";
+const TABLE_SERVICIOS   = "gdm_servicios";
 
 const TABS = [
   { id: "barcos",      label: "Barcos",          icon: "🚢" },
@@ -1060,6 +1061,287 @@ function TabPuertos() {
   );
 }
 
+
+const SERVICIO_LABELS = {
+  alije:       { label: "Alije",                icon: "⚓", color: "#213363" },
+  agua:        { label: "Transporte de Agua",   icon: "💧", color: "#0D7AA8" },
+  slop:        { label: "Transporte de Slop",   icon: "🛢️", color: "#B07D0A" },
+  lubricantes: { label: "Lubricantes",          icon: "🔧", color: "#166534" },
+};
+
+const ZONAS = [
+  { value: "zona_comun", label: "Zona Común" },
+  { value: "zona_alfa",  label: "Zona Alfa"  },
+  { value: "zona_delta", label: "Zona Delta" },
+];
+
+const calcIngresoServicio = (s) => {
+  const ops = s.operaciones_anio || 0;
+  const dias = s.dias_promedio_sitio || 0;
+  const tarifa = s.tarifa_dia_operando || 0;
+  const mob = s.modalidad_pago === "mob_dia_operado" ? (s.mob_demob_usd || 0) : 0;
+  return ops * (mob + dias * tarifa);
+};
+
+function CardServicio({ servicio, onChange }) {
+  const meta = SERVICIO_LABELS[servicio.tipo] || { label: servicio.tipo, icon: "⚙️", color: "#213363" };
+  const isAgua = servicio.tipo === "agua";
+  const isSlop = servicio.tipo === "slop";
+  const isLub  = servicio.tipo === "lubricantes";
+
+  const s = (k, v) => onChange(servicio.id, k, v);
+
+  return (
+    <div className="card" style={{borderTop:`3px solid ${meta.color}`, opacity: servicio.activo ? 1 : 0.6}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:20}}>{meta.icon}</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--navy)"}}>{meta.label}</div>
+            <div style={{fontSize:9,color:"var(--muted)",fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.5}}>
+              {servicio.activo ? "● Activo" : "○ Inactivo"}
+            </div>
+          </div>
+        </div>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+          <div
+            onClick={() => s("activo", !servicio.activo)}
+            style={{
+              width:36,height:20,borderRadius:10,cursor:"pointer",transition:"background .2s",
+              background: servicio.activo ? "var(--navy)" : "var(--border)",
+              position:"relative",flexShrink:0,
+            }}
+          >
+            <div style={{
+              position:"absolute",width:14,height:14,borderRadius:"50%",background:"#fff",
+              top:3,left: servicio.activo ? 19 : 3,transition:"left .2s",
+            }} />
+          </div>
+        </label>
+      </div>
+
+      {/* Zona */}
+      <div className="g2" style={{marginBottom:8}}>
+        <div className="campo">
+          <div className="campo-label">Zona de trabajo</div>
+          <select className="campo-input" value={servicio.zona || "zona_delta"} onChange={e => s("zona", e.target.value)}>
+            {ZONAS.map(z => <option key={z.value} value={z.value}>{z.label}</option>)}
+          </select>
+        </div>
+        <div className="campo">
+          <div className="campo-label">Operaciones / año</div>
+          <input className="campo-input" type="number" min="0" value={servicio.operaciones_anio ?? 0}
+            onChange={e => s("operaciones_anio", parseNum(e.target.value))} />
+        </div>
+      </div>
+
+      {/* Modalidad de pago */}
+      <div className="campo" style={{marginBottom:10}}>
+        <div className="campo-label">Modalidad de pago</div>
+        <div style={{display:"flex",gap:8,marginTop:4}}>
+          {[
+            { value: "mob_dia_operado", label: "Mob/Demob + día operado" },
+            { value: "dia_zarpe",       label: "Día desde zarpe" },
+          ].map(opt => (
+            <div key={opt.value}
+              onClick={() => s("modalidad_pago", opt.value)}
+              style={{
+                flex:1,padding:"8px 10px",borderRadius:8,cursor:"pointer",border:"1.5px solid",
+                borderColor: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--border)",
+                background: servicio.modalidad_pago === opt.value ? "var(--bg)" : "#fff",
+              }}
+            >
+              <div style={{fontSize:10,fontWeight:700,color: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--muted)"}}>
+                {opt.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tarifas */}
+      <div className="g2" style={{marginBottom:8}}>
+        {servicio.modalidad_pago === "mob_dia_operado" && (
+          <div className="campo">
+            <div className="campo-label">Mob / Demob (USD/operación)</div>
+            <input className="campo-input" type="number" min="0" value={servicio.mob_demob_usd ?? 0}
+              onChange={e => s("mob_demob_usd", parseNum(e.target.value))} />
+          </div>
+        )}
+        {servicio.modalidad_pago === "dia_zarpe" && (
+          <div className="campo">
+            <div className="campo-label">Tarifa día navegando (USD/día)</div>
+            <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_navegando ?? 0}
+              onChange={e => s("tarifa_dia_navegando", parseNum(e.target.value))} />
+          </div>
+        )}
+        <div className="campo">
+          <div className="campo-label">Tarifa día operando (USD/día)</div>
+          <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_operando ?? 0}
+            onChange={e => s("tarifa_dia_operando", parseNum(e.target.value))} />
+        </div>
+      </div>
+
+      {/* Duración en sitio */}
+      <div className="campo" style={{marginBottom:8}}>
+        <div className="campo-label">Días promedio en sitio</div>
+        <input className="campo-input" type="number" min="0" step="0.5" value={servicio.dias_promedio_sitio ?? 0}
+          onChange={e => s("dias_promedio_sitio", parseNum(e.target.value))} />
+      </div>
+
+      {/* Campos específicos Agua / Slop */}
+      {(isAgua || isSlop) && (
+        <div className="g2" style={{marginBottom:8}}>
+          <div className="campo">
+            <div className="campo-label">{isAgua ? "m³ promedio por viaje" : "m³ slop por viaje"}</div>
+            <input className="campo-input" type="number" min="0" value={servicio.m3_promedio_viaje ?? 0}
+              onChange={e => s("m3_promedio_viaje", parseNum(e.target.value))} />
+          </div>
+          <div className="campo">
+            <div className="campo-label">Entregas por viaje</div>
+            <input className="campo-input" type="number" min="1" value={servicio.entregas_por_viaje ?? 1}
+              onChange={e => s("entregas_por_viaje", parseNum(e.target.value))} />
+          </div>
+        </div>
+      )}
+
+      {/* Campos específicos Lubricantes */}
+      {isLub && (
+        <div className="campo" style={{marginBottom:8}}>
+          <div className="campo-label">Drums promedio por viaje</div>
+          <input className="campo-input" type="number" min="0" value={servicio.drums_promedio_viaje ?? 0}
+            onChange={e => s("drums_promedio_viaje", parseNum(e.target.value))} />
+        </div>
+      )}
+
+      {/* Resumen ingreso estimado */}
+      <div style={{
+        marginTop:10,padding:"8px 10px",background:"var(--green-bg)",border:"1px solid var(--green-border)",
+        borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center"
+      }}>
+        <span style={{fontSize:9,color:"var(--muted)",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>
+          Ingreso bruto estimado / año
+        </span>
+        <span style={{fontSize:14,fontWeight:800,fontFamily:"var(--mono)",color:"var(--green)"}}>
+          {`$${calcIngresoServicio(servicio).toLocaleString("es-AR", {minimumFractionDigits:0, maximumFractionDigits:0})}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TabServicios() {
+  const [servicios, setServicios] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [msg, setMsg]             = useState(null);
+
+  const showMsg = useCallback((type, text) => {
+    setMsg({ type, text });
+    if (type === "ok") setTimeout(() => setMsg(null), 3000);
+  }, []);
+
+  const loadServicios = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from(TABLE_SERVICIOS).select("*").order("orden");
+      if (error) throw error;
+      setServicios(data || []);
+    } catch (e) {
+      showMsg("err", `Error al cargar servicios: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [showMsg]);
+
+  useEffect(() => { loadServicios(); }, [loadServicios]);
+
+  const onChange = useCallback((id, key, val) => {
+    setServicios(prev => prev.map(s => s.id === id ? { ...s, [key]: val } : s));
+  }, []);
+
+  const guardar = async () => {
+    setSaving(true);
+    try {
+      const updates = servicios.map(s => ({
+        id: s.id,
+        activo: s.activo,
+        zona: s.zona,
+        modalidad_pago: s.modalidad_pago,
+        mob_demob_usd: s.mob_demob_usd,
+        tarifa_dia_navegando: s.tarifa_dia_navegando,
+        tarifa_dia_operando: s.tarifa_dia_operando,
+        operaciones_anio: s.operaciones_anio,
+        dias_promedio_sitio: s.dias_promedio_sitio,
+        m3_promedio_viaje: s.m3_promedio_viaje,
+        entregas_por_viaje: s.entregas_por_viaje,
+        drums_promedio_viaje: s.drums_promedio_viaje,
+      }));
+      const { error } = await supabase.from(TABLE_SERVICIOS).upsert(updates);
+      if (error) throw error;
+      showMsg("ok", "Servicios guardados correctamente.");
+    } catch (e) {
+      showMsg("err", `No se pudieron guardar los servicios: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="empty-state">Cargando servicios...</div>;
+
+  const totalIngreso = servicios
+    .filter(s => s.activo)
+    .reduce((sum, s) => sum + calcIngresoServicio(s), 0);
+
+  return (
+    <div>
+      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+
+      {/* Banner resumen */}
+      <div className="card" style={{marginBottom:16,background:"var(--navy)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:9,color:"rgba(255,255,255,.5)",textTransform:"uppercase",letterSpacing:1.5,fontFamily:"var(--mono)"}}>
+              Ingreso bruto total estimado / año
+            </div>
+            <div style={{fontSize:26,fontWeight:800,color:"#fff",fontFamily:"var(--mono)",marginTop:2}}>
+              ${totalIngreso.toLocaleString("es-AR", {minimumFractionDigits:0, maximumFractionDigits:0})}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            {servicios.map(s => {
+              const meta = SERVICIO_LABELS[s.tipo] || { icon: "⚙️" };
+              return (
+                <div key={s.id} style={{
+                  width:32,height:32,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:16,background: s.activo ? "rgba(255,255,255,.15)" : "rgba(255,255,255,.05)",
+                  border:`1px solid ${s.activo ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.1)"}`,
+                }}>
+                  {meta.icon}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="g2">
+        {servicios.map(s => (
+          <CardServicio key={s.id} servicio={s} onChange={onChange} />
+        ))}
+      </div>
+
+      <div style={{display:"flex",justifyContent:"flex-end",marginTop:4}}>
+        <button className="btn btn-primary" onClick={guardar} disabled={saving}>
+          {saving ? "Guardando..." : "Guardar servicios"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Pronto({ label }) {
   return (
     <div className="pronto">
@@ -1144,7 +1426,7 @@ export default function App() {
       <div className="page">
         {tab === "barcos"      && <TabBarcos precioVlsfo={precioVlsfo} />}
         {tab === "puertos"     && <TabPuertos />}
-        {tab === "servicios"   && <Pronto label="Servicios — próximamente" />}
+        {tab === "servicios"   && <TabServicios />}
         {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} />}
         {tab === "pl"          && <Pronto label="P&L — próximamente" />}
         {tab === "cashflow"    && <Pronto label="Cashflow — próximamente" />}
