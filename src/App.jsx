@@ -1077,17 +1077,38 @@ const ZONAS = [
 
 const calcIngresoServicio = (s) => {
   const ops = s.operaciones_anio || 0;
-  const dias = s.dias_promedio_sitio || 0;
-  const tarifa = s.tarifa_dia_operando || 0;
-  const mob = s.modalidad_pago === "mob_dia_operado" ? (s.mob_demob_usd || 0) : 0;
-  return ops * (mob + dias * tarifa);
+  if (s.tipo === "alije") {
+    const dias = s.dias_promedio_sitio || 0;
+    const tarifa = s.tarifa_dia_operando || 0;
+    if (s.modalidad_pago === "mob_dia_operado") {
+      const mob = s.mob_demob_usd || 0;
+      return ops * (mob + dias * tarifa);
+    }
+    // dia_zarpe: se cobra por día desde zarpe — días operando a tarifa navegando
+    // (los días de navegación se calcularán en P&L cuando tengamos barco+puerto)
+    const tarifaZarpe = s.tarifa_dia_navegando || 0;
+    return ops * dias * tarifaZarpe;
+  }
+  if (s.tipo === "agua" || s.tipo === "slop") {
+    const precio = s.precio_unitario || 0;
+    const m3 = s.m3_promedio_viaje || 0;
+    const entregas = s.entregas_por_viaje || 1;
+    return ops * precio * m3 * entregas;
+  }
+  if (s.tipo === "lubricantes") {
+    const precio = s.precio_unitario || 0;
+    const drums = s.drums_promedio_viaje || 0;
+    return ops * precio * drums;
+  }
+  return 0;
 };
 
 function CardServicio({ servicio, onChange }) {
   const meta = SERVICIO_LABELS[servicio.tipo] || { label: servicio.tipo, icon: "⚙️", color: "#213363" };
-  const isAgua = servicio.tipo === "agua";
-  const isSlop = servicio.tipo === "slop";
-  const isLub  = servicio.tipo === "lubricantes";
+  const isAgua  = servicio.tipo === "agua";
+  const isSlop  = servicio.tipo === "slop";
+  const isLub   = servicio.tipo === "lubricantes";
+  const isAlije = servicio.tipo === "alije";
 
   const s = (k, v) => onChange(servicio.id, k, v);
 
@@ -1104,24 +1125,22 @@ function CardServicio({ servicio, onChange }) {
             </div>
           </div>
         </div>
-        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-          <div
-            onClick={() => s("activo", !servicio.activo)}
-            style={{
-              width:36,height:20,borderRadius:10,cursor:"pointer",transition:"background .2s",
-              background: servicio.activo ? "var(--navy)" : "var(--border)",
-              position:"relative",flexShrink:0,
-            }}
-          >
-            <div style={{
-              position:"absolute",width:14,height:14,borderRadius:"50%",background:"#fff",
-              top:3,left: servicio.activo ? 19 : 3,transition:"left .2s",
-            }} />
-          </div>
-        </label>
+        <div
+          onClick={() => s("activo", !servicio.activo)}
+          style={{
+            width:36,height:20,borderRadius:10,cursor:"pointer",transition:"background .2s",
+            background: servicio.activo ? "var(--navy)" : "var(--border)",
+            position:"relative",flexShrink:0,
+          }}
+        >
+          <div style={{
+            position:"absolute",width:14,height:14,borderRadius:"50%",background:"#fff",
+            top:3,left: servicio.activo ? 19 : 3,transition:"left .2s",
+          }} />
+        </div>
       </div>
 
-      {/* Zona */}
+      {/* Zona + Operaciones */}
       <div className="g2" style={{marginBottom:8}}>
         <div className="campo">
           <div className="campo-label">Zona de trabajo</div>
@@ -1136,63 +1155,72 @@ function CardServicio({ servicio, onChange }) {
         </div>
       </div>
 
-      {/* Modalidad de pago */}
-      <div className="campo" style={{marginBottom:10}}>
-        <div className="campo-label">Modalidad de pago</div>
-        <div style={{display:"flex",gap:8,marginTop:4}}>
-          {[
-            { value: "mob_dia_operado", label: "Mob/Demob + día operado" },
-            { value: "dia_zarpe",       label: "Día desde zarpe" },
-          ].map(opt => (
-            <div key={opt.value}
-              onClick={() => s("modalidad_pago", opt.value)}
-              style={{
-                flex:1,padding:"8px 10px",borderRadius:8,cursor:"pointer",border:"1.5px solid",
-                borderColor: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--border)",
-                background: servicio.modalidad_pago === opt.value ? "var(--bg)" : "#fff",
-              }}
-            >
-              <div style={{fontSize:10,fontWeight:700,color: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--muted)"}}>
-                {opt.label}
+      {/* Modalidad de pago — solo para Alije */}
+      {isAlije && (
+        <div className="campo" style={{marginBottom:10}}>
+          <div className="campo-label">Modalidad de pago</div>
+          <div style={{display:"flex",gap:8,marginTop:4}}>
+            {[
+              { value: "mob_dia_operado", label: "Mob/Demob + día operado" },
+              { value: "dia_zarpe",       label: "Día desde zarpe" },
+            ].map(opt => (
+              <div key={opt.value}
+                onClick={() => s("modalidad_pago", opt.value)}
+                style={{
+                  flex:1,padding:"8px 10px",borderRadius:8,cursor:"pointer",border:"1.5px solid",
+                  borderColor: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--border)",
+                  background: servicio.modalidad_pago === opt.value ? "var(--bg)" : "#fff",
+                }}
+              >
+                <div style={{fontSize:10,fontWeight:700,color: servicio.modalidad_pago === opt.value ? "var(--navy)" : "var(--muted)"}}>
+                  {opt.label}
+                </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tarifas Alije */}
+      {isAlije && (
+        <div className="g2" style={{marginBottom:8}}>
+          {servicio.modalidad_pago === "mob_dia_operado" && (
+            <div className="campo">
+              <div className="campo-label">Mob / Demob (USD/operación)</div>
+              <input className="campo-input" type="number" min="0" value={servicio.mob_demob_usd ?? 0}
+                onChange={e => s("mob_demob_usd", parseNum(e.target.value))} />
             </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Tarifas */}
-      <div className="g2" style={{marginBottom:8}}>
-        {servicio.modalidad_pago === "mob_dia_operado" && (
+          )}
+          {servicio.modalidad_pago === "dia_zarpe" && (
+            <div className="campo">
+              <div className="campo-label">Tarifa día navegando (USD/día)</div>
+              <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_navegando ?? 0}
+                onChange={e => s("tarifa_dia_navegando", parseNum(e.target.value))} />
+            </div>
+          )}
           <div className="campo">
-            <div className="campo-label">Mob / Demob (USD/operación)</div>
-            <input className="campo-input" type="number" min="0" value={servicio.mob_demob_usd ?? 0}
-              onChange={e => s("mob_demob_usd", parseNum(e.target.value))} />
+            <div className="campo-label">Tarifa día operando (USD/día)</div>
+            <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_operando ?? 0}
+              onChange={e => s("tarifa_dia_operando", parseNum(e.target.value))} />
           </div>
-        )}
-        {servicio.modalidad_pago === "dia_zarpe" && (
-          <div className="campo">
-            <div className="campo-label">Tarifa día navegando (USD/día)</div>
-            <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_navegando ?? 0}
-              onChange={e => s("tarifa_dia_navegando", parseNum(e.target.value))} />
-          </div>
-        )}
-        <div className="campo">
-          <div className="campo-label">Tarifa día operando (USD/día)</div>
-          <input className="campo-input" type="number" min="0" value={servicio.tarifa_dia_operando ?? 0}
-            onChange={e => s("tarifa_dia_operando", parseNum(e.target.value))} />
         </div>
-      </div>
+      )}
 
-      {/* Duración en sitio */}
+      {/* Días en sitio — para todos */}
       <div className="campo" style={{marginBottom:8}}>
         <div className="campo-label">Días promedio en sitio</div>
         <input className="campo-input" type="number" min="0" step="0.5" value={servicio.dias_promedio_sitio ?? 0}
           onChange={e => s("dias_promedio_sitio", parseNum(e.target.value))} />
       </div>
 
-      {/* Campos específicos Agua / Slop */}
+      {/* Agua / Slop */}
       {(isAgua || isSlop) && (
         <div className="g2" style={{marginBottom:8}}>
+          <div className="campo">
+            <div className="campo-label">{isAgua ? "Precio (USD/m³)" : "Precio slop (USD/m³)"}</div>
+            <input className="campo-input" type="number" min="0" value={servicio.precio_unitario ?? 0}
+              onChange={e => s("precio_unitario", parseNum(e.target.value))} />
+          </div>
           <div className="campo">
             <div className="campo-label">{isAgua ? "m³ promedio por viaje" : "m³ slop por viaje"}</div>
             <input className="campo-input" type="number" min="0" value={servicio.m3_promedio_viaje ?? 0}
@@ -1203,19 +1231,31 @@ function CardServicio({ servicio, onChange }) {
             <input className="campo-input" type="number" min="1" value={servicio.entregas_por_viaje ?? 1}
               onChange={e => s("entregas_por_viaje", parseNum(e.target.value))} />
           </div>
+          <div className="campo">
+            <div className="campo-label">Total m³ por viaje</div>
+            <input className="campo-formula" readOnly
+              value={`${((servicio.m3_promedio_viaje || 0) * (servicio.entregas_por_viaje || 1)).toFixed(1)} m³`} />
+          </div>
         </div>
       )}
 
-      {/* Campos específicos Lubricantes */}
+      {/* Lubricantes */}
       {isLub && (
-        <div className="campo" style={{marginBottom:8}}>
-          <div className="campo-label">Drums promedio por viaje</div>
-          <input className="campo-input" type="number" min="0" value={servicio.drums_promedio_viaje ?? 0}
-            onChange={e => s("drums_promedio_viaje", parseNum(e.target.value))} />
+        <div className="g2" style={{marginBottom:8}}>
+          <div className="campo">
+            <div className="campo-label">Precio (USD/drum)</div>
+            <input className="campo-input" type="number" min="0" value={servicio.precio_unitario ?? 0}
+              onChange={e => s("precio_unitario", parseNum(e.target.value))} />
+          </div>
+          <div className="campo">
+            <div className="campo-label">Drums promedio por viaje</div>
+            <input className="campo-input" type="number" min="0" value={servicio.drums_promedio_viaje ?? 0}
+              onChange={e => s("drums_promedio_viaje", parseNum(e.target.value))} />
+          </div>
         </div>
       )}
 
-      {/* Resumen ingreso estimado */}
+      {/* Ingreso estimado */}
       <div style={{
         marginTop:10,padding:"8px 10px",background:"var(--green-bg)",border:"1px solid var(--green-border)",
         borderRadius:6,display:"flex",justifyContent:"space-between",alignItems:"center"
@@ -1278,6 +1318,7 @@ function TabServicios() {
         m3_promedio_viaje: s.m3_promedio_viaje,
         entregas_por_viaje: s.entregas_por_viaje,
         drums_promedio_viaje: s.drums_promedio_viaje,
+        precio_unitario: s.precio_unitario,
       }));
       const { error } = await supabase.from(TABLE_SERVICIOS).upsert(updates);
       if (error) throw error;
