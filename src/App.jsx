@@ -50,7 +50,6 @@ const BARCO_DEFAULT = {
   opex_comunicaciones: 3000,
   opex_prefectura: 4400,
   opex_admin: 60000,
-  opex_portuario: 60000,
   opex_retiro_slob: 7000,
 };
 
@@ -117,6 +116,9 @@ select.campo-input{cursor:pointer}
 .data-table .tbl-input:focus{outline:none;border-color:var(--gold)}
 .data-table .tbl-formula{width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:10px;background:#F9FAFB;color:#374151;font-family:var(--mono);text-align:center}
 .data-table .tbl-stat{width:100%;border:1px solid var(--green-border);border-radius:4px;padding:4px 6px;font-size:10px;background:var(--green-bg);color:var(--green);font-family:var(--mono);text-align:center;font-weight:700}
+.tbl-pct-wrap{display:flex;align-items:center;gap:3px}
+.tbl-pct-wrap .tbl-input{flex:1}
+.tbl-pct-label{font-size:10px;color:var(--muted);flex-shrink:0;font-family:var(--mono)}
 
 .costo-pills{display:flex;gap:6px;margin-top:10px}
 .costo-pill{flex:1;border-radius:8px;padding:8px;text-align:center;background:var(--green-bg);border:1px solid var(--green-border)}
@@ -164,7 +166,7 @@ const fmtDec = (n, d = 2) => (n ?? 0).toFixed(d);
 const calcOpexFijo = (b) =>
   (b.opex_mantenimiento || 0) + (b.opex_drydock || 0) + (b.opex_seguros || 0) +
   (b.opex_comunicaciones || 0) + (b.opex_prefectura || 0) + (b.opex_admin || 0) +
-  (b.opex_portuario || 0) + (b.opex_retiro_slob || 0);
+  (b.opex_retiro_slob || 0);
 
 // ─── BLOQUE CONSUMOS ───────────────────────────────────────────────────────
 function BloqueConsumos({ barcoId, precioVlsfo }) {
@@ -707,7 +709,6 @@ function TabBarcos({ precioVlsfo }) {
             ["opex_comunicaciones", "Comunicaciones / satélite"],
             ["opex_prefectura",     "Prefectura / habilitaciones"],
             ["opex_admin",          "Administración"],
-            ["opex_portuario",      "Gastos portuarios"],
             ["opex_retiro_slob",    "Retiro SLOB"],
           ].map(([key, label]) => (
             <div className="campo" key={key}>
