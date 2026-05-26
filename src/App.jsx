@@ -2,21 +2,26 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./lib/supabase";
 
 const PORTAL_URL = "https://evaluacion-proyectos.vercel.app";
-const TABLE_BARCOS      = "gdm_barcos";
-const TABLE_ESCENARIOS  = "gdm_escenarios";
-const TABLE_CONSUMOS    = "gdm_consumos";
-const TABLE_TRIPULACION = "gdm_tripulacion";
-const TABLE_PUERTOS     = "gdm_puertos";
-const TABLE_SERVICIOS   = "gdm_servicios";
+const TABLE_BARCOS               = "gdm_barcos";
+const TABLE_ESCENARIOS           = "gdm_escenarios";
+const TABLE_CONSUMOS             = "gdm_consumos";
+const TABLE_TRIPULACION          = "gdm_tripulacion";
+const TABLE_PUERTOS              = "gdm_puertos";
+const TABLE_SERVICIOS            = "gdm_servicios";
+const TABLE_ESCENARIOS_SERVICIO  = "gdm_escenarios_servicio";
 
 const TABS = [
-  { id: "barcos",      label: "Barcos",          icon: "🚢" },
-  { id: "puertos",     label: "Puertos",         icon: "🏗️" },
-  { id: "servicios",   label: "Servicios",       icon: "⚙️" },
-  { id: "variables",   label: "Variables",       icon: "⛽" },
-  { id: "pl",          label: "P&L",             icon: "📊" },
-  { id: "cashflow",    label: "Cashflow",        icon: "💰" },
-  { id: "comparacion", label: "Comparación",     icon: "📐" },
+  { id: "barcos",      label: "Barcos",           icon: "🚢" },
+  { id: "puertos",     label: "Puertos",          icon: "🏗️" },
+  { id: "servicios",   label: "Tarifario",        icon: "💲" },
+  { id: "variables",   label: "Variables",        icon: "⛽" },
+  { id: "alije",       label: "Alije",            icon: "⚓" },
+  { id: "agua",        label: "Entrega de Agua",  icon: "💧" },
+  { id: "slop",        label: "Transporte Slop",  icon: "🛢️" },
+  { id: "lubricantes", label: "Lubricantes",      icon: "🔧" },
+  { id: "pl",          label: "P&L",              icon: "📊" },
+  { id: "cashflow",    label: "Cashflow",         icon: "💰" },
+  { id: "comparacion", label: "Comparación",      icon: "📐" },
 ];
 
 const POSICIONES = [
@@ -1258,13 +1263,6 @@ function CardServicio({ servicio, onChange }) {
         </div>
       )}
 
-      {/* Días en sitio — para todos */}
-      <div className="campo" style={{marginBottom:8}}>
-        <div className="campo-label">Días promedio en sitio</div>
-        <input className="campo-input" type="number" min="0" step="0.5" value={servicio.dias_promedio_sitio ?? 0}
-          onChange={e => s("dias_promedio_sitio", parseNum(e.target.value))} />
-      </div>
-
       {/* Agua / Slop */}
       {(isAgua || isSlop) && (
         <div className="g2" style={{marginBottom:8}}>
@@ -1511,7 +1509,7 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
       const hsNavIda  = velCrucero > 0 ? distZona / velCrucero : 0;
       const diasNavIda = hsNavIda / 24;
       const diasNavTotal = diasNavIda * 2; // ida + vuelta
-      const diasSitio = srv.dias_promedio_sitio || 0;
+      const diasSitio = (srv.dias_promedio_sitio || srv.dias_operacion || 0);
       const diasPorOp = diasNavTotal + diasSitio;
 
       diasOperativos += ops * diasPorOp;
@@ -2199,6 +2197,506 @@ function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct =
   );
 }
 
+
+const TABLE_ESCENARIOS_SERVICIO = "gdm_escenarios_servicio";
+
+// ─── MOTOR DE VIAJE ────────────────────────────────────────────────────────
+function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocidad, precioVlsfo, precioLubricante) {
+  if (!escenario || !barco || !puerto || !velocidad) return null;
+
+  const pvlsfo = precioVlsfo || 1000;
+  const plub   = precioLubricante || 2200;
+
+  // Fila de consumo para esta velocidad
+  const fila = consumos.length > 0
+    ? consumos.reduce((prev, curr) =>
+        Math.abs(curr.velocidad - velocidad) < Math.abs(prev.velocidad - velocidad) ? curr : prev)
+    : null;
+
+  const consLastre  = fila?.consumo_lastre || 0;
+  const consCarga   = fila?.consumo_carga  || 0;
+  const consPuerto  = barco.consumo_puerto || 0;
+  const lubPct      = (fila?.lubricante_pct || 3) / 100;
+  const lubPuertoPct = (barco.lubricante_pct_puerto || 3) / 100;
+
+  // Distancia según zona
+  const dist = escenario.zona === "zona_comun" ? (puerto.dist_zona_comun || 0)
+             : escenario.zona === "zona_alfa"  ? (puerto.dist_zona_alfa  || 0)
+             : (puerto.dist_zona_delta || 0);
+
+  // Tramo 0 — Alistamiento (horas → días fracción)
+  const hsAlist     = escenario.hs_alistamiento || 0;
+  const diasAlist   = hsAlist / 24;
+
+  // Tramo 1 — Navegación ida (lastre para alije/lubricantes, cargado para slop, lastre para agua)
+  const tipoServicio = escenario.tipo_servicio;
+  const idaEsCarga   = tipoServicio === "slop"; // slop sale cargado (recoge slop del barco)
+  const vueltaEsCarga = tipoServicio === "agua" || tipoServicio === "lubricantes"; // agua/lub vuelve vacío
+  const consIda      = idaEsCarga ? consCarga : consLastre;
+  const consVuelta   = vueltaEsCarga ? consLastre : consCarga;
+
+  const hsNavIda     = velocidad > 0 ? (dist / velocidad) : 0;
+  const diasNavIda   = hsNavIda / 24;
+
+  // Tramo 2 — Operación
+  const diasOp       = escenario.dias_operacion || 0;
+
+  // Tramo 3 — Navegación vuelta
+  const diasNavVuelta = diasNavIda; // misma distancia
+
+  // Total días embarcados (redondeado arriba sobre el total)
+  const totalDiasFraccion = diasAlist + diasNavIda + diasOp + diasNavVuelta;
+  const totalDiasEmbarcados = Math.ceil(totalDiasFraccion);
+
+  // Costos combustible por tramo
+  const costoCombAlist   = diasAlist   * consPuerto  * pvlsfo;
+  const costoLubAlist    = diasAlist   * consPuerto  * lubPuertoPct * plub;
+  const costoCombIda     = diasNavIda  * consIda     * pvlsfo;
+  const costoLubIda      = diasNavIda  * consIda     * lubPct * plub;
+  const costoCombOp      = diasOp      * consPuerto  * pvlsfo;
+  const costoLubOp       = diasOp      * consPuerto  * lubPuertoPct * plub;
+  const costoCombVuelta  = diasNavVuelta * consVuelta * pvlsfo;
+  const costoLubVuelta   = diasNavVuelta * consVuelta * lubPct * plub;
+
+  const totalCombustible = costoCombAlist + costoCombIda + costoCombOp + costoCombVuelta;
+  const totalLubricante  = costoLubAlist  + costoLubIda  + costoLubOp  + costoLubVuelta;
+
+  // Costos tripulación (sobre días embarcados totales redondeados)
+  const tripDia = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0) * (r.costo_dia_navegando || 0), 0);
+  const costoTrip = totalDiasEmbarcados * tripDia;
+
+  // Costos puerto
+  const costoPuerto = (puerto.costo_portuario_dia || 0) * Math.ceil(diasAlist)
+                    + (puerto.costo_estiba || 0)
+                    + (puerto.costo_bunker_operacion || 0);
+
+  // Costos específicos servicio
+  let costoServicio = 0;
+  if (tipoServicio === "agua")        costoServicio = (escenario.m3_agua || 0) * (puerto.costo_agua_m3 || 0);
+  if (tipoServicio === "slop")        costoServicio = (escenario.m3_slop || 0) * (puerto.costo_slop_m3 || 0);
+
+  const totalCostos = totalCombustible + totalLubricante + costoTrip + costoPuerto + costoServicio;
+
+  // Ingresos
+  let ingreso = 0;
+  if (tipoServicio === "alije") {
+    if (escenario.modalidad_pago === "mob_dia_operado") {
+      ingreso = (escenario.mob_demob_usd || 0) + diasOp * (escenario.tarifa_dia_operando || 0);
+    } else {
+      ingreso = totalDiasFraccion * (escenario.tarifa_dia_navegando || 0);
+    }
+  } else if (tipoServicio === "agua") {
+    ingreso = (escenario.m3_agua || 0) * (escenario.precio_unitario || 0);
+  } else if (tipoServicio === "slop") {
+    ingreso = (escenario.m3_slop || 0) * (escenario.precio_unitario || 0);
+  } else if (tipoServicio === "lubricantes") {
+    ingreso = (escenario.drums_lubricante || 0) * (escenario.precio_unitario || 0);
+  }
+
+  const resultado = ingreso - totalCostos;
+
+  return {
+    velocidad,
+    dist,
+    hsAlist, diasAlist,
+    hsNavIda, diasNavIda, diasNavVuelta,
+    diasOp,
+    totalDiasFraccion,
+    totalDiasEmbarcados,
+    costoCombAlist, costoLubAlist,
+    costoCombIda, costoLubIda,
+    costoCombOp, costoLubOp,
+    costoCombVuelta, costoLubVuelta,
+    totalCombustible, totalLubricante,
+    costoTrip, costoPuerto, costoServicio,
+    totalCostos,
+    ingreso,
+    resultado,
+    margen: ingreso > 0 ? resultado / ingreso : 0,
+  };
+}
+
+// ─── CARD ESCENARIO ────────────────────────────────────────────────────────
+function CardEscenario({ escenario, barcos, puertos, consumosPorBarco, tripulacionPorBarco,
+                         servicios, precioVlsfo, precioLubricante, onChange, onDelete }) {
+  const [deleting, setDeleting] = useState(false);
+
+  const barco   = barcos.find(b => b.id === escenario.barco_id);
+  const puerto  = puertos.find(p => p.id === escenario.puerto_id);
+  const consumos    = barco ? (consumosPorBarco[barco.id] || []) : [];
+  const tripulacion = barco ? (tripulacionPorBarco[barco.id] || []) : [];
+
+  // Tarifario del servicio correspondiente
+  const tarifario = servicios.find(s => s.tipo === escenario.tipo_servicio);
+
+  const s = (k, v) => onChange(escenario.id, k, v);
+
+  // Calcular resultado para cada velocidad disponible
+  const resultadosPorVel = consumos.map(c =>
+    calcularViaje(escenario, barco, puerto, consumos, tripulacion, c.velocidad, precioVlsfo, precioLubricante)
+  ).filter(Boolean);
+
+  const isAlije = escenario.tipo_servicio === "alije";
+  const isAgua  = escenario.tipo_servicio === "agua";
+  const isSlop  = escenario.tipo_servicio === "slop";
+  const isLub   = escenario.tipo_servicio === "lubricantes";
+
+  return (
+    <div className="card" style={{marginBottom:16}}>
+      {/* Header escenario */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input
+            className="campo-input"
+            value={escenario.nombre || ""}
+            onChange={e => s("nombre", e.target.value)}
+            style={{fontSize:13,fontWeight:700,width:220}}
+          />
+        </div>
+        <button className="btn btn-danger" onClick={async () => { setDeleting(true); await onDelete(escenario.id); setDeleting(false); }}
+          disabled={deleting} style={{padding:"4px 10px",fontSize:10}}>
+          {deleting ? "Eliminando..." : "Eliminar"}
+        </button>
+      </div>
+
+      {/* Configuración */}
+      <div className="g2" style={{marginBottom:12}}>
+        <div className="card" style={{background:"var(--bg)",margin:0}}>
+          <div className="sec">Configuración del viaje</div>
+          <div className="g2">
+            <div className="campo"><div className="campo-label">Barco</div>
+              <select className="campo-input" value={escenario.barco_id || ""} onChange={e => s("barco_id", e.target.value)}>
+                <option value="">— Seleccioná —</option>
+                {barcos.map(b => <option key={b.id} value={b.id}>🚢 {b.nombre}</option>)}
+              </select>
+            </div>
+            <div className="campo"><div className="campo-label">Puerto de zarpe</div>
+              <select className="campo-input" value={escenario.puerto_id || ""} onChange={e => s("puerto_id", e.target.value)}>
+                <option value="">— Seleccioná —</option>
+                {puertos.map(p => <option key={p.id} value={p.id}>🏗️ {p.nombre}</option>)}
+              </select>
+            </div>
+            <div className="campo"><div className="campo-label">Zona de trabajo</div>
+              <select className="campo-input" value={escenario.zona || "zona_delta"} onChange={e => s("zona", e.target.value)}>
+                <option value="zona_comun">Zona Común</option>
+                <option value="zona_alfa">Zona Alfa</option>
+                <option value="zona_delta">Zona Delta</option>
+              </select>
+            </div>
+            <div className="campo"><div className="campo-label">Hs. alistamiento</div>
+              <input className="campo-input" type="number" min="0" value={escenario.hs_alistamiento ?? 12}
+                onChange={e => s("hs_alistamiento", parseNum(e.target.value))} />
+            </div>
+            <div className="campo"><div className="campo-label">Días operación en sitio</div>
+              <input className="campo-input" type="number" min="0" step="0.5" value={escenario.dias_operacion ?? 1}
+                onChange={e => s("dias_operacion", parseNum(e.target.value))} />
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{background:"var(--bg)",margin:0}}>
+          <div className="sec">Tarifas del viaje</div>
+          {isAlije && (
+            <>
+              <div className="campo"><div className="campo-label">Modalidad de pago</div>
+                <select className="campo-input" value={escenario.modalidad_pago || "mob_dia_operado"} onChange={e => s("modalidad_pago", e.target.value)}>
+                  <option value="mob_dia_operado">Mob/Demob + día operado</option>
+                  <option value="dia_zarpe">Día desde zarpe</option>
+                </select>
+              </div>
+              {escenario.modalidad_pago === "mob_dia_operado" && (
+                <div className="campo"><div className="campo-label">Mob/Demob (USD)</div>
+                  <input className="campo-input" type="number" min="0" value={escenario.mob_demob_usd ?? 0}
+                    onChange={e => s("mob_demob_usd", parseNum(e.target.value))} />
+                </div>
+              )}
+              {escenario.modalidad_pago === "dia_zarpe" && (
+                <div className="campo"><div className="campo-label">Tarifa día navegando (USD/día)</div>
+                  <input className="campo-input" type="number" min="0" value={escenario.tarifa_dia_navegando ?? 0}
+                    onChange={e => s("tarifa_dia_navegando", parseNum(e.target.value))} />
+                </div>
+              )}
+              <div className="campo"><div className="campo-label">Tarifa día operando (USD/día)</div>
+                <input className="campo-input" type="number" min="0" value={escenario.tarifa_dia_operando ?? 0}
+                  onChange={e => s("tarifa_dia_operando", parseNum(e.target.value))} />
+              </div>
+            </>
+          )}
+          {(isAgua || isSlop) && (
+            <>
+              <div className="campo"><div className="campo-label">{isAgua ? "m³ a entregar" : "m³ slop a recoger"}</div>
+                <input className="campo-input" type="number" min="0"
+                  value={isAgua ? (escenario.m3_agua ?? 0) : (escenario.m3_slop ?? 0)}
+                  onChange={e => s(isAgua ? "m3_agua" : "m3_slop", parseNum(e.target.value))} />
+              </div>
+              <div className="campo"><div className="campo-label">Precio (USD/m³)</div>
+                <input className="campo-input" type="number" min="0" value={escenario.precio_unitario ?? 0}
+                  onChange={e => s("precio_unitario", parseNum(e.target.value))} />
+              </div>
+            </>
+          )}
+          {isLub && (
+            <>
+              <div className="campo"><div className="campo-label">Drums a entregar</div>
+                <input className="campo-input" type="number" min="0" value={escenario.drums_lubricante ?? 0}
+                  onChange={e => s("drums_lubricante", parseNum(e.target.value))} />
+              </div>
+              <div className="campo"><div className="campo-label">Precio (USD/drum)</div>
+                <input className="campo-input" type="number" min="0" value={escenario.precio_unitario ?? 0}
+                  onChange={e => s("precio_unitario", parseNum(e.target.value))} />
+              </div>
+            </>
+          )}
+          {tarifario && (
+            <div style={{marginTop:8,padding:"6px 8px",background:"var(--surface)",borderRadius:6,fontSize:9,color:"var(--muted)"}}>
+              💲 Tarifario base: {tarifario.precio_unitario > 0 ? `$${tarifario.precio_unitario}/unidad` : ""} {tarifario.tarifa_dia_operando > 0 ? `$${tarifario.tarifa_dia_operando}/día op.` : ""}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tabla de sensibilidad por velocidad */}
+      {barco && puerto && consumos.length > 0 && (
+        <div>
+          <div className="sec">Análisis de sensibilidad por velocidad</div>
+          <div style={{overflowX:"auto"}}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Vel. (kn)</th>
+                  <th>Dist. (nm)</th>
+                  <th>Hs. Nav.</th>
+                  <th>Días emb. ↑</th>
+                  <th>Comb.</th>
+                  <th>Lub.</th>
+                  <th>Tripulación</th>
+                  <th>Puerto</th>
+                  <th>Total costos</th>
+                  <th>Ingreso</th>
+                  <th style={{fontWeight:800}}>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resultadosPorVel.map((r, i) => (
+                  <tr key={i} style={{
+                    background: r.resultado === Math.max(...resultadosPorVel.map(x => x.resultado))
+                      ? "var(--green-bg)" : "transparent"
+                  }}>
+                    <td style={{fontWeight:700,textAlign:"center"}}>{r.velocidad}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.dist}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.hsNavIda.toFixed(1)}</td>
+                    <td style={{textAlign:"center",fontWeight:700,color:"var(--navy)",fontFamily:"var(--mono)"}}>{r.totalDiasEmbarcados}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalCombustible)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalLubricante)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoTrip)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoPuerto)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color:"var(--red)"}}>{fmtCompact(r.totalCostos)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{fmtCompact(r.ingreso)}</td>
+                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,
+                      color: r.resultado >= 0 ? "var(--green)" : "var(--red)"}}>{fmtCompact(r.resultado)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {resultadosPorVel.length > 0 && (
+            <div style={{marginTop:8,fontSize:9,color:"var(--muted)",fontStyle:"italic"}}>
+              * Fila verde = velocidad óptima para este escenario · Días embarcados redondeados ↑ sobre total del viaje
+            </div>
+          )}
+        </div>
+      )}
+
+      {(!barco || !puerto) && (
+        <div className="empty-state" style={{padding:20}}>Seleccioná un barco y un puerto para ver el análisis.</div>
+      )}
+    </div>
+  );
+}
+
+// ─── TAB SERVICIO GENÉRICA ─────────────────────────────────────────────────
+function TabServicio({ tipoServicio, titulo, icono, precioVlsfo, precioLubricante }) {
+  const [escenarios, setEscenarios]           = useState([]);
+  const [barcos, setBarcos]                   = useState([]);
+  const [puertos, setPuertos]                 = useState([]);
+  const [servicios, setServicios]             = useState([]);
+  const [consumosPorBarco, setConsumosPorBarco]       = useState({});
+  const [tripulacionPorBarco, setTripulacionPorBarco] = useState({});
+  const [loading, setLoading]                 = useState(true);
+  const [saving, setSaving]                   = useState(false);
+  const [msg, setMsg]                         = useState(null);
+
+  const showMsg = useCallback((type, text) => {
+    setMsg({ type, text });
+    if (type === "ok") setTimeout(() => setMsg(null), 3000);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [re, rb, rp, rs] = await Promise.all([
+        supabase.from(TABLE_ESCENARIOS_SERVICIO).select("*")
+          .eq("tipo_servicio", tipoServicio).order("orden"),
+        supabase.from(TABLE_BARCOS).select("*").order("created_at"),
+        supabase.from(TABLE_PUERTOS).select("*").order("orden"),
+        supabase.from(TABLE_SERVICIOS).select("*").order("orden"),
+      ]);
+      if (re.error) throw re.error;
+      if (rb.error) throw rb.error;
+      if (rp.error) throw rp.error;
+      if (rs.error) throw rs.error;
+
+      setEscenarios(re.data || []);
+      setBarcos(rb.data || []);
+      setPuertos(rp.data || []);
+      setServicios(rs.data || []);
+
+      // Cargar consumos y tripulación de todos los barcos
+      const consumosMap = {};
+      const tripMap = {};
+      await Promise.all((rb.data || []).map(async (b) => {
+        const [rc, rt] = await Promise.all([
+          supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", b.id).order("orden"),
+          supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id", b.id).order("orden"),
+        ]);
+        consumosMap[b.id] = rc.data || [];
+        tripMap[b.id]     = rt.data || [];
+      }));
+      setConsumosPorBarco(consumosMap);
+      setTripulacionPorBarco(tripMap);
+    } catch (e) {
+      showMsg("err", `Error al cargar datos: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [tipoServicio, showMsg]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const onChange = useCallback((id, key, val) => {
+    setEscenarios(prev => prev.map(e => e.id === id ? { ...e, [key]: val } : e));
+  }, []);
+
+  const guardar = async () => {
+    setSaving(true);
+    try {
+      const updates = escenarios.map(e => ({
+        id: e.id,
+        tipo_servicio: e.tipo_servicio,
+        nombre: e.nombre,
+        orden: e.orden,
+        barco_id: e.barco_id || null,
+        puerto_id: e.puerto_id || null,
+        zona: e.zona,
+        hs_alistamiento: e.hs_alistamiento,
+        dias_operacion: e.dias_operacion,
+        m3_agua: e.m3_agua,
+        m3_slop: e.m3_slop,
+        drums_lubricante: e.drums_lubricante,
+        modalidad_pago: e.modalidad_pago,
+        mob_demob_usd: e.mob_demob_usd,
+        tarifa_dia_navegando: e.tarifa_dia_navegando,
+        tarifa_dia_operando: e.tarifa_dia_operando,
+        precio_unitario: e.precio_unitario,
+      }));
+      const { error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).upsert(updates);
+      if (error) throw error;
+      showMsg("ok", "Escenarios guardados.");
+    } catch (e) {
+      showMsg("err", `No se pudieron guardar: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const nuevoEscenario = async () => {
+    if (escenarios.length >= 25) return;
+    const tarifario = servicios.find(s => s.tipo === tipoServicio);
+    setSaving(true);
+    try {
+      const { data, error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).insert({
+        tipo_servicio: tipoServicio,
+        nombre: `Escenario ${escenarios.length + 1}`,
+        orden: escenarios.length,
+        hs_alistamiento: 12,
+        dias_operacion: 1,
+        zona: "zona_delta",
+        modalidad_pago: tarifario?.modalidad_pago || "mob_dia_operado",
+        mob_demob_usd: tarifario?.mob_demob_usd || 0,
+        tarifa_dia_navegando: tarifario?.tarifa_dia_navegando || 0,
+        tarifa_dia_operando: tarifario?.tarifa_dia_operando || 0,
+        precio_unitario: tarifario?.precio_unitario || 0,
+        m3_agua: 0, m3_slop: 0, drums_lubricante: 0,
+      }).select().single();
+      if (error) throw error;
+      setEscenarios(prev => [...prev, data]);
+    } catch (e) {
+      showMsg("err", `No se pudo crear el escenario: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const eliminar = async (id) => {
+    if (!window.confirm("¿Eliminar este escenario?")) return;
+    try {
+      const { error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).delete().eq("id", id);
+      if (error) throw error;
+      setEscenarios(prev => prev.filter(e => e.id !== id));
+      showMsg("ok", "Escenario eliminado.");
+    } catch (e) {
+      showMsg("err", `No se pudo eliminar: ${e.message}`);
+    }
+  };
+
+  if (loading) return <div className="empty-state">Cargando escenarios...</div>;
+
+  return (
+    <div>
+      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+        <div style={{fontSize:16,fontWeight:800,color:"var(--navy)"}}>
+          {icono} {titulo}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {escenarios.length < 25 && (
+            <button className="btn btn-primary" onClick={nuevoEscenario} disabled={saving}>
+              + Nuevo escenario
+            </button>
+          )}
+          {escenarios.length > 0 && (
+            <button className="btn btn-primary" onClick={guardar} disabled={saving}>
+              {saving ? "Guardando..." : "Guardar todo"}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {escenarios.length === 0 && (
+        <div className="empty-state">
+          No hay escenarios todavía. Creá uno para empezar a analizar.
+        </div>
+      )}
+
+      {escenarios.map(esc => (
+        <CardEscenario
+          key={esc.id}
+          escenario={esc}
+          barcos={barcos}
+          puertos={puertos}
+          consumosPorBarco={consumosPorBarco}
+          tripulacionPorBarco={tripulacionPorBarco}
+          servicios={servicios}
+          precioVlsfo={precioVlsfo}
+          precioLubricante={precioLubricante}
+          onChange={onChange}
+          onDelete={eliminar}
+        />
+      ))}
+    </div>
+  );
+}
 function Pronto({ label }) {
   return (
     <div className="pronto">
@@ -2289,6 +2787,10 @@ export default function App() {
         {tab === "puertos"     && <TabPuertos />}
         {tab === "servicios"   && <TabServicios />}
         {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} onCrecimientoChange={handleCrecimientoChange} onLubricanteChange={handleLubricanteChange} />}
+        {tab === "alije"       && <TabServicio tipoServicio="alije"       titulo="Alijes"             icono="⚓" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
+        {tab === "agua"        && <TabServicio tipoServicio="agua"        titulo="Entrega de Agua"    icono="💧" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
+        {tab === "slop"        && <TabServicio tipoServicio="slop"        titulo="Transporte de Slop" icono="🛢️" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
+        {tab === "lubricantes" && <TabServicio tipoServicio="lubricantes" titulo="Lubricantes"        icono="🔧" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
         {tab === "pl"          && <TabPL precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
         {tab === "cashflow"    && <TabCashflow precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
         {tab === "comparacion" && <TabComparacion precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
