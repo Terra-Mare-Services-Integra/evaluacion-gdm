@@ -2198,8 +2198,6 @@ function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct =
 }
 
 
-const TABLE_ESCENARIOS_SERVICIO = "gdm_escenarios_servicio";
-
 // ─── MOTOR DE VIAJE ────────────────────────────────────────────────────────
 function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocidad, precioVlsfo, precioLubricante) {
   if (!escenario || !barco || !puerto || !velocidad) return null;
