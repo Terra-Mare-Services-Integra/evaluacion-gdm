@@ -2611,10 +2611,11 @@ function TabServicio({ tipoServicio, titulo, icono }) {
             {/* Header row */}
             <thead>
               <tr>
-                <th style={{background:"var(--bg)",border:"1px solid var(--border)",
-                  padding:"0 10px",height:52,verticalAlign:"middle",
-                  fontSize:8,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",
-                  letterSpacing:1}} />
+                <th style={{background:"var(--bg)",border:"1px solid var(--border)",padding:"12px 10px",minHeight:72,verticalAlign:"top"}} />
+
+
+
+
                 {escenarios.map(esc => {
                   const key = matrixKey(esc);
                   const isActive = key === activeKey;
@@ -2623,21 +2624,34 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                     <th key={key}
                       onClick={() => setActiveKey(key)}
                       style={{
-                        height:52,padding:"0 10px",cursor:"pointer",
+                        minHeight:72,padding:"12px 10px 10px",cursor:"pointer",
                         background: isActive ? "var(--navy)" : "var(--mid)",
                         border: isActive ? "2px solid var(--blue)" : "1px solid var(--border)",
-                        verticalAlign:"middle",textAlign:"left",
+                        verticalAlign:"top",textAlign:"left",
                       }}>
-                      <div style={{fontSize:8,fontWeight:700,color:"rgba(255,255,255,.6)",
-                        fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.5,
-                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                      {/* Barco */}
+                      <div style={{
+                        fontSize:8,fontWeight:700,color:"rgba(255,255,255,.65)",
+                        fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.8,
+                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                        marginBottom:6,paddingBottom:6,
+                        borderBottom:"1px solid rgba(255,255,255,.15)",
+                      }}>
                         🚢 {barco?.nombre||"—"}
                       </div>
-                      <div style={{fontSize:10,fontWeight:700,color:"#fff",
-                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>
+                      {/* Ruta */}
+                      <div style={{
+                        fontSize:11,fontWeight:700,color:"#fff",
+                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                        lineHeight:1.3,
+                      }}>
                         {icono} {nombreEscenario(esc, puertos)}
                       </div>
-                      <div style={{fontSize:8,color:"rgba(255,255,255,.45)",fontFamily:"var(--mono)",marginTop:1}}>
+                      {/* Mercado */}
+                      <div style={{
+                        fontSize:8,color:"rgba(255,255,255,.45)",fontFamily:"var(--mono)",
+                        marginTop:6,letterSpacing:.3,
+                      }}>
                         {esc.operaciones_anio||0} op/año
                       </div>
                     </th>
