@@ -129,6 +129,7 @@ select.campo-input{cursor:pointer}
 .field-input{width:100%;border:1px solid var(--gold-border);border-radius:4px;padding:4px 6px;font-size:11px;background:var(--gold-bg);color:#78610E;font-family:var(--sans)}
 .field-input:focus{outline:none;border-color:var(--gold)}
 select.field-input{cursor:pointer}
+.field-formula{width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;background:#F0F4F8;color:var(--navy);font-family:var(--mono);font-weight:700;cursor:default}
 .data-table .tbl-formula{width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:10px;background:#F9FAFB;color:#374151;font-family:var(--mono);text-align:center}
 .data-table .tbl-stat{width:100%;border:1px solid var(--green-border);border-radius:4px;padding:4px 6px;font-size:10px;background:var(--green-bg);color:var(--green);font-family:var(--mono);text-align:center;font-weight:700}
 .tbl-pct-wrap{display:flex;align-items:center;gap:3px}
@@ -1093,29 +1094,10 @@ function TabPuertos() {
         <input className="field-input" type="number" value={p.costo_indirecto_lumpsum??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_indirecto_lumpsum:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Anual (× 12)",                render: (p) => (
-        <input className="tbl-formula" readOnly value={fmtUSD((p.costo_indirecto_lumpsum||0)*12)} />
+        <input className="field-formula" readOnly value={fmtUSD((p.costo_indirecto_lumpsum||0)*12)} />
     )},
     { label: "Nota / descripción",           render: (p, i) => (
         <input className="field-input" value={p.nota_indirectos||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nota_indirectos:e.target.value}:x)); }} placeholder="—" />
-    )},
-    { sec: "⑤ Condiciones operativas",       items: null },
-    { label: "Calado máx. (m)",             render: (p, i) => (
-        <input className="field-input" type="number" step="0.1" value={p.calado_max_m??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,calado_max_m:parseNum(e.target.value)}:x)); }} />
-    )},
-    { label: "Horas operativas / día",       render: (p, i) => (
-        <input className="field-input" type="number" value={p.horas_operativas??24} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,horas_operativas:parseNum(e.target.value)}:x)); }} />
-    )},
-    { label: "Espera promedio (hs)",         render: (p, i) => (
-        <input className="field-input" type="number" step="0.5" value={p.espera_promedio_hs??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,espera_promedio_hs:parseNum(e.target.value)}:x)); }} />
-    )},
-    { label: "Grúa disponible",              render: (p, i) => (
-        <select className="field-input" value={p.tiene_grua?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,tiene_grua:e.target.value==="true"}:x)); }}>
-          <option value="false">No</option>
-          <option value="true">Sí</option>
-        </select>
-    )},
-    { label: "Restricción viento / clima",   render: (p, i) => (
-        <input className="field-input" value={p.restriccion_viento||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,restriccion_viento:e.target.value}:x)); }} placeholder="—" />
     )},
   ];
 
