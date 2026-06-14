@@ -2237,8 +2237,83 @@ function TabServicio({ tipoServicio, titulo, icono }) {
   const isSlop  = tipoServicio === "slop";
   const isLub   = tipoServicio === "lubricantes";
 
-  // Construir FILAS de la tabla de columnas
-  const FILAS = [
+  // Calcula el desglose operacional completo para un escenario
+  const calcDesglose = (esc) => {
+    const barco  = barcos.find(b => b.id === esc.barco_id);
+    const puerto = puertos.find(p => p.id === esc.puerto_id);
+    if (!barco || !puerto) return null;
+    const consumos    = consumosPorBarco[barco.id] || [];
+    const tripulacion = tripulacionPorBarco[barco.id] || [];
+
+    const dotacion = tripulacion.reduce((s,r) => s+(r.cantidad_navegando||0), 0);
+    const costoDiaTripNav = tripulacion.reduce((s,r) => s+(r.cantidad_navegando||0)*(r.costo_dia_navegando||0), 0);
+    const costoDiaTripPto = tripulacion.reduce((s,r) => s+(r.cantidad_puerto||0)*(r.costo_dia_puerto||0), 0);
+
+    const velCrucero = barco.velocidad_crucero || 8;
+    const dist = esc.zona === "zona_comun" ? (puerto.dist_zona_comun||0)
+               : esc.zona === "zona_alfa"  ? (puerto.dist_zona_alfa||0)
+               : (puerto.dist_zona_delta||0);
+
+    const diasAlist  = (esc.hs_alistamiento||0)/24;
+    const diasDesarm = (esc.hs_desarmado||4)/24;
+    const diasNavIda = velCrucero > 0 ? (dist/velCrucero)/24 : 0;
+    const diasNavVta = diasNavIda;
+    const diasSitio  = esc.dias_operacion || 0;
+    const diasTotalFrac = diasAlist + diasNavIda + diasSitio + diasNavVta + diasDesarm;
+    const diasEmb    = Math.ceil(diasTotalFrac);
+
+    const filaVel = consumos.length > 0
+      ? consumos.reduce((p,c) => Math.abs(c.velocidad-velCrucero)<Math.abs(p.velocidad-velCrucero)?c:p)
+      : null;
+    const pvlsfo = puerto.precio_vlsfo||1000;
+    const plub   = puerto.precio_lubricante||2200;
+    const cLas   = filaVel?.consumo_lastre||0;
+    const cPto   = barco.consumo_puerto||0;
+    const lubPct = (filaVel?.lubricante_pct||3)/100;
+    const lubPtoPct = (barco.lubricante_pct_puerto||3)/100;
+
+    const combAlist  = diasAlist  * cPto  * pvlsfo; const lubAlist  = diasAlist  * cPto  * lubPtoPct * plub;
+    const combIda    = diasNavIda * cLas  * pvlsfo; const lubIda    = diasNavIda * cLas  * lubPct    * plub;
+    const combSitio  = diasSitio  * cPto  * pvlsfo; const lubSitio  = diasSitio  * cPto  * lubPtoPct * plub;
+    const combVta    = diasNavVta * cLas  * pvlsfo; const lubVta    = diasNavVta * cLas  * lubPct    * plub;
+    const combDesarm = diasDesarm * cPto  * pvlsfo; const lubDesarm = diasDesarm * cPto  * lubPtoPct * plub;
+    const totalComb  = combAlist+combIda+combSitio+combVta+combDesarm;
+    const totalLub   = lubAlist +lubIda +lubSitio +lubVta +lubDesarm;
+
+    const costoTrip = diasEmb * costoDiaTripNav;
+
+    const viveresDiaPers = puerto.viveres_dia_persona||0;
+    const costoViveres   = esc.viveres_activo ? diasEmb*dotacion*viveresDiaPers : 0;
+
+    const costoZarpe  = esc.costo_despacho_zarpe  ?? puerto.costo_despacho_zarpe  ?? 0;
+    const costoArribo = esc.costo_despacho_arribo ?? puerto.costo_despacho_arribo ?? 0;
+
+    const costoEstibaOp  = esc.estiba_op_activo  ? (puerto.costo_estiba||0)                            : 0;
+    const costoEstibaHs  = esc.estiba_hs_activo  ? (puerto.costo_estiba_hora||0)*(esc.estiba_hs_cantidad||0) : 0;
+    const costoEstibaDia = esc.estiba_dia_activo ? (puerto.costo_estiba_dia||0)*Math.ceil(diasSitio)   : 0;
+    const costoEstibaTn  = esc.estiba_tn_activo  ? (puerto.costo_estiba_tn||0)*(esc.estiba_tn_cantidad||0)   : 0;
+    const costoBunker    = esc.bunker_activo      ? (puerto.costo_bunker_operacion||0)                  : 0;
+    const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker;
+
+    const totalCostos = totalComb+totalLub+costoTrip+costoViveres+costoZarpe+costoArribo+costoOpVar;
+    const ingresoMD   = (esc.mob_demob_usd||0)+diasSitio*(esc.tarifa_dia_operando||0);
+    const ingresoZarpe= diasTotalFrac*(esc.tarifa_dia_navegando||0);
+
+    return {
+      dist, velCrucero, pvlsfo, plub, dotacion,
+      diasAlist, diasDesarm, diasNavIda, diasNavVta, diasSitio, diasTotalFrac, diasEmb,
+      combAlist,lubAlist, combIda,lubIda, combSitio,lubSitio, combVta,lubVta, combDesarm,lubDesarm,
+      totalComb, totalLub, costoTrip,
+      costoViveres, viveresDiaPers, costoZarpe, costoArribo, costoOpVar,
+      costoEstibaOp, costoEstibaHs, costoEstibaDia, costoEstibaTn, costoBunker,
+      totalCostos, ingresoMD, ingresoZarpe,
+      resultMD: ingresoMD - totalCostos, resultZarpe: ingresoZarpe - totalCostos,
+      puerto,
+    };
+  };
+
+  // FILAS estáticas (inputs editables) — iguales para todas las columnas
+  const FILAS_INPUT = [
     { sec: "① Configuración" },
     { label: "Hs. alistamiento", render: (e, key) => (
         <input className="field-input" type="number" min="0" value={e.hs_alistamiento??12}
@@ -2266,20 +2341,11 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           <input className="field-input" type="number" min="0" value={e.tarifa_dia_operando??0}
             onChange={ev => setField(key,"tarifa_dia_operando",parseNum(ev.target.value))} />
       )},
-      { label: "Ingreso / op.", render: (e) => {
-          const v = (e.mob_demob_usd||0) + (e.dias_operacion||0)*(e.tarifa_dia_operando||0);
-          return <input className="field-formula" readOnly value={fmtUSD(v)} />;
-      }},
       { sec: "③ Día desde zarpe" },
       { label: "Tarifa día navegando", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.tarifa_dia_navegando??0}
             onChange={ev => setField(key,"tarifa_dia_navegando",parseNum(ev.target.value))} />
       )},
-      { label: "Ingreso / op. *", render: (e) => {
-          const dias = (e.hs_alistamiento||0)/24 + (e.dias_operacion||0);
-          const v = dias * (e.tarifa_dia_navegando||0);
-          return <input className="field-formula" readOnly value={v>0?`${fmtUSD(v)} *`:"—"} />;
-      }},
     ] : []),
     ...((isAgua||isSlop) ? [
       { sec: "② Tarifas" },
@@ -2304,6 +2370,112 @@ function TabServicio({ tipoServicio, titulo, icono }) {
             onChange={ev => setField(key,"precio_unitario",parseNum(ev.target.value))} />
       )},
     ] : []),
+    // Desglose operacional — filas calculadas por escenario
+    { sec: "④ Tiempos y combustible" },
+    { label: "Alistamiento",      calc: (d) => d ? `${fmtDec(d.diasAlist,2)}d · ${fmtCompact(d.combAlist+d.lubAlist)}` : "—" },
+    { label: "Navegación ida",    calc: (d) => d ? `${fmtDec(d.diasNavIda,2)}d · ${fmtCompact(d.combIda+d.lubIda)}`  : "—" },
+    { label: "Operación sitio",   calc: (d) => d ? `${fmtDec(d.diasSitio,2)}d · ${fmtCompact(d.combSitio+d.lubSitio)}` : "—" },
+    { label: "Navegación vuelta", calc: (d) => d ? `${fmtDec(d.diasNavVta,2)}d · ${fmtCompact(d.combVta+d.lubVta)}`  : "—" },
+    { label: "Desarmado",         calc: (d) => d ? `${fmtDec(d.diasDesarm,2)}d · ${fmtCompact(d.combDesarm+d.lubDesarm)}` : "—" },
+    { label: "Días embarcados ↑", calc: (d) => d ? `${d.diasEmb} días` : "—", bold: true },
+    { label: "Comb. + Lub. total",calc: (d) => d ? fmtCompact(d.totalComb+d.totalLub) : "—", red: true },
+    { label: "Tripulación",       calc: (d) => d ? fmtCompact(d.costoTrip) : "—", red: true },
+    { sec: "⑤ Costos portuarios" },
+    { label: "Despacho zarpe",  renderCalc: (e, key, d) => d ? (
+        <input className="field-input" type="number" min="0" value={e.costo_despacho_zarpe??0}
+          onChange={ev => setField(key,"costo_despacho_zarpe",parseNum(ev.target.value))} />
+    ) : null },
+    { label: "Despacho arribo", renderCalc: (e, key, d) => d ? (
+        <input className="field-input" type="number" min="0" value={e.costo_despacho_arribo??0}
+          onChange={ev => setField(key,"costo_despacho_arribo",parseNum(ev.target.value))} />
+    ) : null },
+    { label: "Víveres", renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"viveres_activo",!e.viveres_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,
+              display:"flex",alignItems:"center",justifyContent:"center",
+              background:e.viveres_activo?"var(--navy)":"var(--bg)",
+              border:`2px solid ${e.viveres_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.viveres_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,
+            color:e.viveres_activo?"var(--red)":"var(--light)"}}>
+            {e.viveres_activo ? fmtCompact(d.costoViveres) : `${d.dotacion}p × ${d.diasEmb}d × $${d.viveresDiaPers}`}
+          </span>
+        </div>
+    ) : null },
+    { sec: "⑥ Costos op. variables" },
+    { label: "Estiba / op.",    renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"estiba_op_activo",!e.estiba_op_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:e.estiba_op_activo?"var(--navy)":"var(--bg)",border:`2px solid ${e.estiba_op_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.estiba_op_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,color:e.estiba_op_activo?"var(--red)":"var(--light)"}}>
+            {e.estiba_op_activo ? fmtCompact(d.costoEstibaOp) : `$${d.puerto.costo_estiba||0}/op`}
+          </span>
+        </div>
+    ) : null },
+    { label: "Estiba / hora",   renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"estiba_hs_activo",!e.estiba_hs_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:e.estiba_hs_activo?"var(--navy)":"var(--bg)",border:`2px solid ${e.estiba_hs_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.estiba_hs_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          {e.estiba_hs_activo
+            ? <input className="field-input" type="number" min="0" placeholder="hs"
+                value={e.estiba_hs_cantidad??0} style={{flex:1}}
+                onChange={ev => setField(key,"estiba_hs_cantidad",parseNum(ev.target.value))} />
+            : <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,color:"var(--light)"}}>
+                {`$${d.puerto.costo_estiba_hora||0}/hs`}
+              </span>
+          }
+        </div>
+    ) : null },
+    { label: "Estiba / día",    renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"estiba_dia_activo",!e.estiba_dia_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:e.estiba_dia_activo?"var(--navy)":"var(--bg)",border:`2px solid ${e.estiba_dia_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.estiba_dia_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,color:e.estiba_dia_activo?"var(--red)":"var(--light)"}}>
+            {e.estiba_dia_activo ? fmtCompact(d.costoEstibaDia) : `$${d.puerto.costo_estiba_dia||0}/día`}
+          </span>
+        </div>
+    ) : null },
+    { label: "Estiba / Tn",     renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"estiba_tn_activo",!e.estiba_tn_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:e.estiba_tn_activo?"var(--navy)":"var(--bg)",border:`2px solid ${e.estiba_tn_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.estiba_tn_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          {e.estiba_tn_activo
+            ? <input className="field-input" type="number" min="0" placeholder="Tn"
+                value={e.estiba_tn_cantidad??0} style={{flex:1}}
+                onChange={ev => setField(key,"estiba_tn_cantidad",parseNum(ev.target.value))} />
+            : <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,color:"var(--light)"}}>
+                {`$${d.puerto.costo_estiba_tn||0}/Tn`}
+              </span>
+          }
+        </div>
+    ) : null },
+    { label: "Bunker",          renderCalc: (e, key, d) => d ? (
+        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
+          <div onClick={() => setField(key,"bunker_activo",!e.bunker_activo)}
+            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:e.bunker_activo?"var(--navy)":"var(--bg)",border:`2px solid ${e.bunker_activo?"var(--navy)":"var(--border)"}`}}>
+            {e.bunker_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
+          </div>
+          <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,color:e.bunker_activo?"var(--red)":"var(--light)"}}>
+            {e.bunker_activo ? fmtCompact(d.costoBunker) : `$${d.puerto.costo_bunker_operacion||0}/op`}
+          </span>
+        </div>
+    ) : null },
+    { label: "TOTAL COSTOS",    calc: (d) => d ? fmtCompact(d.totalCostos) : "—", bold: true, red: true },
+    { sec: "⑦ Resultado" },
+    { label: "Ingreso Mob/Demob", calc: (d) => d ? fmtUSD(d.ingresoMD) : "—" },
+    { label: "Resultado Mob/Demob", calc: (d) => d ? fmtCompact(d.resultMD) : "—", bold: true, result: true },
+    { label: "Ingreso día zarpe *", calc: (d) => d ? fmtUSD(d.ingresoZarpe) : "—" },
+    { label: "Resultado día zarpe", calc: (d) => d ? fmtCompact(d.resultZarpe) : "—", bold: true, result: true },
   ];
 
   const activeEsc      = escenarios.find(e => matrixKey(e) === activeKey);
@@ -2418,7 +2590,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
 
               {/* Etiquetas */}
               <div style={{width:170,minWidth:170,flexShrink:0,paddingTop:52}}>
-                {FILAS.map((fila, fi) => (
+                {FILAS_INPUT.map((fila, fi) => (
                   fila.sec
                     ? <div key={fi} style={{
                         height:34,display:"flex",alignItems:"center",padding:"0 10px",
@@ -2428,17 +2600,19 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                       }}>{fila.sec}</div>
                     : <div key={fi} style={{
                         height:38,display:"flex",alignItems:"center",padding:"0 10px",
-                        fontSize:10,fontWeight:600,color:"var(--muted)",
+                        fontSize:10,fontWeight: fila.bold?700:600,
+                        color: fila.bold ? "var(--navy)" : "var(--muted)",
                         borderBottom:"1px solid #F3F6FA",
                       }}>{fila.label}</div>
                 ))}
               </div>
 
-              {/* Columna por escenario activo */}
+              {/* Columna por escenario */}
               {escenarios.map(esc => {
                 const key = matrixKey(esc);
                 const isActive = key === activeKey;
-                const barco  = barcos.find(b => b.id === esc.barco_id);
+                const barco = barcos.find(b => b.id === esc.barco_id);
+                const d = calcDesglose(esc);
                 return (
                   <div key={key} style={{
                     width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,
@@ -2469,18 +2643,36 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                     </div>
 
                     {/* Filas */}
-                    {FILAS.map((fila, fi) => (
-                      fila.sec
+                    {FILAS_INPUT.map((fila, fi) => {
+                      const cellBg = fila.result && d
+                        ? (fila.calc(d).startsWith("-") ? "var(--red-bg)" : "var(--green-bg)")
+                        : "transparent";
+                      return fila.sec
                         ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,
                             background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
                         : <div key={fi} style={{
                             height:38,display:"flex",alignItems:"center",
                             padding:"0 6px",borderBottom:"1px solid #F3F6FA",
                             width:COL_W,boxSizing:"border-box",overflow:"hidden",
+                            background: cellBg,
                           }}>
-                            {fila.render(esc, key)}
-                          </div>
-                    ))}
+                            {fila.render
+                              ? fila.render(esc, key)
+                              : fila.renderCalc
+                              ? (fila.renderCalc(esc, key, d) || <span style={{fontSize:10,color:"var(--light)"}}>—</span>)
+                              : fila.calc
+                              ? <input className="field-formula" readOnly
+                                  value={fila.calc(d)}
+                                  style={{
+                                    fontWeight: fila.bold ? 800 : 400,
+                                    color: fila.red ? "var(--red)" : fila.result && d
+                                      ? (fila.calc(d).startsWith("-") ? "var(--red)" : "var(--green)")
+                                      : "var(--navy)",
+                                  }} />
+                              : null
+                            }
+                          </div>;
+                    })}
 
                     {/* Footer */}
                     <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
@@ -2494,8 +2686,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
               })}
             </div>
           </div>
-
-          {/* Desglose operacional del escenario activo */}
           {activeEsc && activeBarco && activePuerto && (() => {
             const esc = activeEsc;
             const barco = activeBarco;
