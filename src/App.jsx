@@ -925,7 +925,11 @@ const PUERTO_DEFAULT = {
   orden: 0,
   costo_portuario_dia: 0,
   costo_estiba: 0,
-  estiba_modalidad: "operacion",
+  costo_estiba_hora: 0,
+  costo_estiba_dia: 0,
+  costo_estiba_tn: 0,
+  costo_grua_hora: 0,
+  costo_grua_operacion: 0,
   costo_agua_m3: 0,
   costo_slop_m3: 0,
   costo_bunker_operacion: 0,
@@ -991,7 +995,11 @@ function TabPuertos() {
         activo: puerto.activo,
         costo_portuario_dia: puerto.costo_portuario_dia,
         costo_estiba: puerto.costo_estiba,
-        estiba_modalidad: puerto.estiba_modalidad,
+        costo_estiba_hora: puerto.costo_estiba_hora,
+        costo_estiba_dia: puerto.costo_estiba_dia,
+        costo_estiba_tn: puerto.costo_estiba_tn,
+        costo_grua_hora: puerto.costo_grua_hora,
+        costo_grua_operacion: puerto.costo_grua_operacion,
         costo_agua_m3: puerto.costo_agua_m3,
         costo_slop_m3: puerto.costo_slop_m3,
         costo_bunker_operacion: puerto.costo_bunker_operacion,
@@ -1079,24 +1087,24 @@ function TabPuertos() {
     { label: "Portuario / día",              render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_portuario_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_portuario_dia:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba — modalidad",           render: (p, i) => (
-        <select className="field-input" value={p.estiba_modalidad||"operacion"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,estiba_modalidad:e.target.value}:x)); }}>
-          <option value="operacion">Por operación</option>
-          <option value="hora">Por hora</option>
-          <option value="dia">Por día</option>
-          <option value="tonelada">Por tonelada</option>
-        </select>
+    { label: "Estiba / operación (USD)",     render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_estiba??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba — valor (USD)",         render: (p, i) => {
-        const unidad = {operacion:"/ op.",hora:"/ hs",dia:"/ día",tonelada:"/ Tn"}[p.estiba_modalidad||"operacion"];
-        return (
-          <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
-            <input className="field-input" type="number" style={{flex:1}} value={p.costo_estiba??0}
-              onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
-            <span style={{fontSize:9,color:"var(--muted)",whiteSpace:"nowrap",fontFamily:"var(--mono)"}}>{unidad}</span>
-          </div>
-        );
-    }},
+    { label: "Estiba / hora (USD/hs)",       render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_estiba_hora??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_hora:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Estiba / día (USD/día)",       render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_estiba_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_dia:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Estiba / tonelada (USD/Tn)",   render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_estiba_tn??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_tn:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Grúa / hora (USD/hs)",         render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_grua_hora??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_grua_hora:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Grúa / operación (USD)",       render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_grua_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_grua_operacion:parseNum(e.target.value)}:x)); }} />
+    )},
     { label: "Compra agua (USD/m³)",         render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_agua_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_agua_m3:parseNum(e.target.value)}:x)); }} />
     )},
