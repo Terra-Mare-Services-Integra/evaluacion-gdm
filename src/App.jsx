@@ -37,6 +37,7 @@ const BARCO_DEFAULT = {
   tipo: "FSV / Crew Boat",
   estado: "propio_amortizado",
   precio_compra: 0,
+  velocidad_crucero: 8,
   arancel_pct: 0,
   capex_refit: 0,
   deuda_pct: 0,
@@ -588,7 +589,38 @@ function TabBarcos({ precioVlsfo }) {
     if (!barco) return;
     setSaving(true);
     try {
-      const { error } = await supabase.from(TABLE_BARCOS).update(barco).eq("id", barco.id);
+      const { error } = await supabase.from(TABLE_BARCOS).update({
+        nombre:                        barco.nombre,
+        tipo:                          barco.tipo,
+        estado:                        barco.estado,
+        precio_compra:                 barco.precio_compra,
+        velocidad_crucero:             barco.velocidad_crucero,
+        arancel_pct:                   barco.arancel_pct,
+        capex_refit:                   barco.capex_refit,
+        deuda_pct:                     barco.deuda_pct,
+        tasa_deuda:                    barco.tasa_deuda,
+        anio_salida:                   barco.anio_salida,
+        valor_residual_pct:            barco.valor_residual_pct,
+        vida_util:                     barco.vida_util,
+        cap_agua_m3:                   barco.cap_agua_m3,
+        cap_slop_m3:                   barco.cap_slop_m3,
+        cap_lubricantes_drums:         barco.cap_lubricantes_drums,
+        cap_carga_general_tn:          barco.cap_carga_general_tn,
+        consumo_puerto:                barco.consumo_puerto,
+        lubricante_pct_puerto:         barco.lubricante_pct_puerto,
+        opex_mantenimiento:            barco.opex_mantenimiento,
+        opex_seguros:                  barco.opex_seguros,
+        opex_comunicaciones:           barco.opex_comunicaciones,
+        opex_prefectura:               barco.opex_prefectura,
+        opex_admin:                    barco.opex_admin,
+        opex_retiro_slob:              barco.opex_retiro_slob,
+        drydock_full_costo:            barco.drydock_full_costo,
+        drydock_full_cada_anios:       barco.drydock_full_cada_anios,
+        drydock_full_meses:            barco.drydock_full_meses,
+        drydock_intermedio_costo:      barco.drydock_intermedio_costo,
+        drydock_intermedio_cada_anios: barco.drydock_intermedio_cada_anios,
+        drydock_intermedio_meses:      barco.drydock_intermedio_meses,
+      }).eq("id", barco.id);
       if (error) throw error;
       showMsg("ok", "Cambios guardados correctamente.");
     } catch (e) {
@@ -677,7 +709,13 @@ function TabBarcos({ precioVlsfo }) {
                 <option value="tc">Time Charter (TC)</option>
               </select>
             </div>
+            <div className="campo"><div className="campo-label">Velocidad crucero P&L (kn)</div>
+              <input className="campo-input" type="number" step="0.5" min="1" max="25"
+                value={barco.velocidad_crucero ?? 8}
+                onChange={e => set("velocidad_crucero", parseNum(e.target.value))} />
+            </div>
           </div>
+          <p className="nota">* La velocidad de crucero se usa en P&L, Cashflow y Comparación para estimar días de navegación por operación.</p>
         </div>
 
         {/* BLOQUE 2 — ADQUISICION */}
@@ -818,7 +856,7 @@ function TabVariables({ onPrecioChange, onCrecimientoChange, onLubricanteChange 
         setLoading(false);
       }
     })();
-  }, [showMsg, onPrecioChange]);
+  }, [showMsg, onPrecioChange, onCrecimientoChange, onLubricanteChange]);
 
   const setVar = (id, val) => {
     setVars(prev => prev.map(v => v.id === id ? { ...v, valor: parseNum(val) } : v));
@@ -827,12 +865,15 @@ function TabVariables({ onPrecioChange, onCrecimientoChange, onLubricanteChange 
   const guardar = async () => {
     setSaving(true);
     try {
-      for (const v of vars) {
-        const { error } = await supabase.from("gdm_variables_globales")
-          .update({ valor: v.valor, updated_at: new Date().toISOString() })
-          .eq("id", v.id);
-        if (error) throw error;
-      }
+      const resultados = await Promise.all(
+        vars.map(v =>
+          supabase.from("gdm_variables_globales")
+            .update({ valor: v.valor, updated_at: new Date().toISOString() })
+            .eq("id", v.id)
+        )
+      );
+      const primerError = resultados.find(r => r.error);
+      if (primerError) throw primerError.error;
       const vlsfo = vars.find(v => v.clave === "precio_vlsfo");
       if (vlsfo && onPrecioChange) onPrecioChange(vlsfo.valor);
       const crec = vars.find(v => v.clave === "crecimiento_operaciones_pct");
@@ -1562,9 +1603,11 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
     const impuesto = ebit > 0 ? ebit * 0.35 : 0;
     const resultadoNeto = ebit - impuesto;
 
-    // Cashflow
-    const fco = ebitda - impuesto;
-    const valorResidual = anio === anios ? (barco.precio_compra || 0) * (barco.valor_residual_pct || 0) : 0;
+    // FCO = resultado neto + D&A (la depreciación no es salida de caja)
+    const fco = resultadoNeto + da;
+    // Valor residual: se realiza en el año de salida configurado (no siempre el último año del modelo)
+    const anioSalida = barco.anio_salida || anios;
+    const valorResidual = anio === anioSalida ? (barco.precio_compra || 0) * (barco.valor_residual_pct || 0) : 0;
 
     resultado.push({
       anio: 2025 + anio - 1,
@@ -2329,10 +2372,12 @@ function CardEscenario({ escenario, barcos, puertos, consumosPorBarco, tripulaci
 
   const s = (k, v) => onChange(escenario.id, k, v);
 
-  // Calcular resultado para cada velocidad disponible
-  const resultadosPorVel = consumos.map(c =>
-    calcularViaje(escenario, barco, puerto, consumos, tripulacion, c.velocidad, precioVlsfo, precioLubricante)
-  ).filter(Boolean);
+  // Calcular resultado para cada velocidad disponible (solo si barco y puerto están definidos)
+  const resultadosPorVel = (barco && puerto)
+    ? consumos.map(c =>
+        calcularViaje(escenario, barco, puerto, consumos, tripulacion, c.velocidad, precioVlsfo, precioLubricante)
+      ).filter(Boolean)
+    : [];
 
   const isAlije = escenario.tipo_servicio === "alije";
   const isAgua  = escenario.tipo_servicio === "agua";
