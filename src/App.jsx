@@ -2044,6 +2044,12 @@ const nombreEscenario = (esc, puertos) => {
 };
 
 // ─── TAB SERVICIO GENÉRICA ─────────────────────────────────────────────────
+const ZONAS_LIST = [
+  { value: "zona_comun", label: "Zona Común" },
+  { value: "zona_alfa",  label: "Zona Alfa"  },
+  { value: "zona_delta", label: "Zona Delta" },
+];
+
 function TabServicio({ tipoServicio, titulo, icono }) {
   const [escenarios, setEscenarios]                   = useState([]);
   const [barcos, setBarcos]                           = useState([]);
@@ -2053,7 +2059,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
   const [loading, setLoading]                         = useState(true);
   const [saving, setSaving]                           = useState(false);
   const [msg, setMsg]                                 = useState(null);
-  const [activeIdx, setActiveIdx]                     = useState(0);
+  const [activeKey, setActiveKey]                     = useState(null);
+  const [showMatrix, setShowMatrix]                   = useState(false);
 
   const showMsg = useCallback((type, text) => {
     setMsg({ type, text });
@@ -2076,6 +2083,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
       setEscenarios(re.data || []);
       setBarcos(rb.data || []);
       setPuertos(rp.data || []);
+      if (re.data?.length > 0) setActiveKey(matrixKey(re.data[0]));
 
       const consumosMap = {};
       const tripMap = {};
@@ -2098,20 +2106,20 @@ function TabServicio({ tipoServicio, titulo, icono }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const setField = useCallback((idx, key, val) => {
-    setEscenarios(prev => prev.map((e, i) => i === idx ? { ...e, [key]: val } : e));
+  // Clave única por combinación barco+puerto+zona
+  const matrixKey = (e) => `${e.barco_id}__${e.puerto_id}__${e.zona}`;
+
+  const setField = useCallback((key, field, val) => {
+    setEscenarios(prev => prev.map(e => matrixKey(e) === key ? { ...e, [field]: val } : e));
   }, []);
 
-  const guardar = async (idx) => {
-    const e = escenarios[idx];
+  const guardar = async (key) => {
+    const e = escenarios.find(x => matrixKey(x) === key);
     if (!e) return;
     setSaving(true);
     try {
       const { error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).update({
         nombre:               nombreEscenario(e, puertos),
-        barco_id:             e.barco_id || null,
-        puerto_id:            e.puerto_id || null,
-        zona:                 e.zona,
         hs_alistamiento:      e.hs_alistamiento,
         dias_operacion:       e.dias_operacion,
         operaciones_anio:     e.operaciones_anio,
@@ -2125,9 +2133,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         drums_lubricante:     e.drums_lubricante,
       }).eq("id", e.id);
       if (error) throw error;
-      setEscenarios(prev => prev.map((x, i) =>
-        i === idx ? { ...x, nombre: nombreEscenario(e, puertos) } : x
-      ));
       showMsg("ok", "Guardado.");
     } catch (err) {
       showMsg("err", `Error: ${err.message}`);
@@ -2136,44 +2141,56 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     }
   };
 
-  const nuevoEscenario = async () => {
-    if (escenarios.length >= 20) return;
-    setSaving(true);
-    try {
-      const { data, error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).insert({
-        tipo_servicio:    tipoServicio,
-        nombre:           `Escenario ${escenarios.length + 1}`,
-        orden:            escenarios.length,
-        hs_alistamiento:  12,
-        dias_operacion:   1,
-        operaciones_anio: 0,
-        zona:             "zona_delta",
-        modalidad_pago:   "mob_dia_operado",
-        mob_demob_usd: 0, tarifa_dia_navegando: 0, tarifa_dia_operando: 0,
-        precio_unitario: 0, m3_agua: 0, m3_slop: 0, drums_lubricante: 0,
-      }).select().single();
-      if (error) throw error;
-      setEscenarios(prev => { setActiveIdx(prev.length); return [...prev, data]; });
-    } catch (e) {
-      showMsg("err", `No se pudo crear: ${e.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
+  // Activar combinación — crea si no existe, elimina si ya existe
+  const toggleCombinacion = async (barcoId, puertoId, zona) => {
+    const key = `${barcoId}__${puertoId}__${zona}`;
+    const existente = escenarios.find(e => matrixKey(e) === key);
 
-  const eliminar = async (idx) => {
-    const e = escenarios[idx];
-    if (!e || !window.confirm(`¿Eliminar "${nombreEscenario(e, puertos)}"?`)) return;
-    try {
-      const { error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).delete().eq("id", e.id);
-      if (error) throw error;
-      setEscenarios(prev => {
-        const u = prev.filter((_, i) => i !== idx);
-        setActiveIdx(i => Math.min(i, Math.max(0, u.length - 1)));
-        return u;
-      });
-    } catch (err) {
-      showMsg("err", `Error: ${err.message}`);
+    if (existente) {
+      // Desactivar — eliminar de BD
+      if (!window.confirm(`¿Quitar este escenario? Se perderán las tarifas cargadas.`)) return;
+      setSaving(true);
+      try {
+        const { error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).delete().eq("id", existente.id);
+        if (error) throw error;
+        setEscenarios(prev => {
+          const u = prev.filter(e => matrixKey(e) !== key);
+          if (activeKey === key) setActiveKey(u.length > 0 ? matrixKey(u[0]) : null);
+          return u;
+        });
+      } catch (err) {
+        showMsg("err", `Error: ${err.message}`);
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      // Activar — crear en BD
+      const barco  = barcos.find(b => b.id === barcoId);
+      const puerto = puertos.find(p => p.id === puertoId);
+      setSaving(true);
+      try {
+        const { data, error } = await supabase.from(TABLE_ESCENARIOS_SERVICIO).insert({
+          tipo_servicio:    tipoServicio,
+          nombre:           `${puerto?.nombre||""} → ${ZONA_LABEL[zona]||zona}`,
+          barco_id:         barcoId,
+          puerto_id:        puertoId,
+          zona,
+          orden:            escenarios.length,
+          hs_alistamiento:  12,
+          dias_operacion:   1,
+          operaciones_anio: 0,
+          modalidad_pago:   "mob_dia_operado",
+          mob_demob_usd: 0, tarifa_dia_navegando: 0, tarifa_dia_operando: 0,
+          precio_unitario: 0, m3_agua: 0, m3_slop: 0, drums_lubricante: 0,
+        }).select().single();
+        if (error) throw error;
+        setEscenarios(prev => [...prev, data]);
+        setActiveKey(key);
+      } catch (err) {
+        showMsg("err", `Error: ${err.message}`);
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
@@ -2184,256 +2201,317 @@ function TabServicio({ tipoServicio, titulo, icono }) {
   const isSlop  = tipoServicio === "slop";
   const isLub   = tipoServicio === "lubricantes";
 
+  // Construir FILAS de la tabla de columnas
   const FILAS = [
     { sec: "① Configuración" },
-    { label: "Barco", render: (e, i) => (
-        <select className="field-input" value={e.barco_id||""} onChange={ev => setField(i,"barco_id",ev.target.value)}>
-          <option value="">— Seleccioná —</option>
-          {barcos.map(b => <option key={b.id} value={b.id}>🚢 {b.nombre}</option>)}
-        </select>
-    )},
-    { label: "Puerto de zarpe", render: (e, i) => (
-        <select className="field-input" value={e.puerto_id||""} onChange={ev => setField(i,"puerto_id",ev.target.value)}>
-          <option value="">— Seleccioná —</option>
-          {puertos.map(p => <option key={p.id} value={p.id}>🏗️ {p.nombre}</option>)}
-        </select>
-    )},
-    { label: "Zona de trabajo", render: (e, i) => (
-        <select className="field-input" value={e.zona||"zona_delta"} onChange={ev => setField(i,"zona",ev.target.value)}>
-          <option value="zona_comun">Zona Común</option>
-          <option value="zona_alfa">Zona Alfa</option>
-          <option value="zona_delta">Zona Delta</option>
-        </select>
-    )},
-    { label: "Hs. alistamiento", render: (e, i) => (
+    { label: "Hs. alistamiento", render: (e, key) => (
         <input className="field-input" type="number" min="0" value={e.hs_alistamiento??12}
-          onChange={ev => setField(i,"hs_alistamiento",parseNum(ev.target.value))} />
+          onChange={ev => setField(key,"hs_alistamiento",parseNum(ev.target.value))} />
     )},
-    { label: "Días en sitio", render: (e, i) => (
+    { label: "Días en sitio", render: (e, key) => (
         <input className="field-input" type="number" min="0" step="0.5" value={e.dias_operacion??1}
-          onChange={ev => setField(i,"dias_operacion",parseNum(ev.target.value))} />
+          onChange={ev => setField(key,"dias_operacion",parseNum(ev.target.value))} />
     )},
-    { label: "Operaciones / año", render: (e, i) => (
+    { label: "Operaciones / año", render: (e, key) => (
         <input className="field-input" type="number" min="0" value={e.operaciones_anio??0}
-          onChange={ev => setField(i,"operaciones_anio",parseNum(ev.target.value))} />
+          onChange={ev => setField(key,"operaciones_anio",parseNum(ev.target.value))} />
     )},
-    { sec: "② Tarifas" },
     ...(isAlije ? [
-      { label: "Modalidad", render: (e, i) => (
-          <select className="field-input" value={e.modalidad_pago||"mob_dia_operado"} onChange={ev => setField(i,"modalidad_pago",ev.target.value)}>
-            <option value="mob_dia_operado">Mob/Demob + día op.</option>
-            <option value="dia_zarpe">Día desde zarpe</option>
-          </select>
-      )},
-      { label: "Mob/Demob (USD)", render: (e, i) => (
+      { sec: "② Mob/Demob + día op." },
+      { label: "Mob/Demob (USD/op)", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.mob_demob_usd??0}
-            onChange={ev => setField(i,"mob_demob_usd",parseNum(ev.target.value))} />
+            onChange={ev => setField(key,"mob_demob_usd",parseNum(ev.target.value))} />
       )},
-      { label: "Tarifa día navegando", render: (e, i) => (
-          <input className="field-input" type="number" min="0" value={e.tarifa_dia_navegando??0}
-            onChange={ev => setField(i,"tarifa_dia_navegando",parseNum(ev.target.value))} />
-      )},
-      { label: "Tarifa día operando", render: (e, i) => (
+      { label: "Tarifa día operando", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.tarifa_dia_operando??0}
-            onChange={ev => setField(i,"tarifa_dia_operando",parseNum(ev.target.value))} />
+            onChange={ev => setField(key,"tarifa_dia_operando",parseNum(ev.target.value))} />
       )},
+      { label: "Ingreso / op.", render: (e) => {
+          const v = (e.mob_demob_usd||0) + (e.dias_operacion||0)*(e.tarifa_dia_operando||0);
+          return <input className="field-formula" readOnly value={fmtUSD(v)} />;
+      }},
+      { sec: "③ Día desde zarpe" },
+      { label: "Tarifa día navegando", render: (e, key) => (
+          <input className="field-input" type="number" min="0" value={e.tarifa_dia_navegando??0}
+            onChange={ev => setField(key,"tarifa_dia_navegando",parseNum(ev.target.value))} />
+      )},
+      { label: "Ingreso / op. *", render: (e) => {
+          const dias = (e.hs_alistamiento||0)/24 + (e.dias_operacion||0);
+          const v = dias * (e.tarifa_dia_navegando||0);
+          return <input className="field-formula" readOnly value={v>0?`${fmtUSD(v)} *`:"—"} />;
+      }},
     ] : []),
-    ...((isAgua || isSlop) ? [
-      { label: isAgua ? "m³ a entregar" : "m³ slop a recoger", render: (e, i) => (
+    ...((isAgua||isSlop) ? [
+      { sec: "② Tarifas" },
+      { label: isAgua?"m³ a entregar":"m³ slop a recoger", render: (e, key) => (
           <input className="field-input" type="number" min="0"
-            value={isAgua ? (e.m3_agua??0) : (e.m3_slop??0)}
-            onChange={ev => setField(i, isAgua?"m3_agua":"m3_slop", parseNum(ev.target.value))} />
+            value={isAgua?(e.m3_agua??0):(e.m3_slop??0)}
+            onChange={ev => setField(key,isAgua?"m3_agua":"m3_slop",parseNum(ev.target.value))} />
       )},
-      { label: "Precio (USD/m³)", render: (e, i) => (
+      { label: "Precio (USD/m³)", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.precio_unitario??0}
-            onChange={ev => setField(i,"precio_unitario",parseNum(ev.target.value))} />
+            onChange={ev => setField(key,"precio_unitario",parseNum(ev.target.value))} />
       )},
     ] : []),
     ...(isLub ? [
-      { label: "Drums a entregar", render: (e, i) => (
+      { sec: "② Tarifas" },
+      { label: "Drums a entregar", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.drums_lubricante??0}
-            onChange={ev => setField(i,"drums_lubricante",parseNum(ev.target.value))} />
+            onChange={ev => setField(key,"drums_lubricante",parseNum(ev.target.value))} />
       )},
-      { label: "Precio (USD/drum)", render: (e, i) => (
+      { label: "Precio (USD/drum)", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.precio_unitario??0}
-            onChange={ev => setField(i,"precio_unitario",parseNum(ev.target.value))} />
+            onChange={ev => setField(key,"precio_unitario",parseNum(ev.target.value))} />
       )},
     ] : []),
   ];
 
-  // Tabla de sensibilidad del escenario activo
-  const activeEsc     = escenarios[activeIdx];
-  const activeBarco   = activeEsc ? barcos.find(b => b.id === activeEsc.barco_id) : null;
-  const activePuerto  = activeEsc ? puertos.find(p => p.id === activeEsc.puerto_id) : null;
-  const activeConsumos    = activeBarco ? (consumosPorBarco[activeBarco.id] || []) : [];
-  const activeTripulacion = activeBarco ? (tripulacionPorBarco[activeBarco.id] || []) : [];
+  const activeEsc      = escenarios.find(e => matrixKey(e) === activeKey);
+  const activeBarco    = activeEsc ? barcos.find(b => b.id === activeEsc.barco_id) : null;
+  const activePuerto   = activeEsc ? puertos.find(p => p.id === activeEsc.puerto_id) : null;
+  const activeConsumos    = activeBarco ? (consumosPorBarco[activeBarco.id]||[]) : [];
+  const activeTripulacion = activeBarco ? (tripulacionPorBarco[activeBarco.id]||[]) : [];
   const resultadosPorVel  = (activeBarco && activePuerto)
     ? activeConsumos.map(c =>
         calcularViaje(activeEsc, activeBarco, activePuerto, activeConsumos, activeTripulacion, c.velocidad)
       ).filter(Boolean)
     : [];
 
-  const COL_W = 240;
+  const COL_W = 220;
+
+  // Todas las combinaciones posibles
+  const todasCombinaciones = [];
+  for (const b of barcos)
+    for (const p of puertos)
+      for (const z of ZONAS_LIST)
+        todasCombinaciones.push({ barco: b, puerto: p, zona: z });
 
   return (
     <div>
-      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+      {msg && <div className={`msg ${msg.type==="err"?"msg-err":"msg-ok"}`}>{msg.text}</div>}
 
-      {/* Layout columnas */}
-      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16}}>
-        <div style={{display:"flex",width:"max-content"}}>
-
-          {/* Columna etiquetas */}
-          <div style={{width:170,minWidth:170,flexShrink:0,paddingTop:52}}>
-            {FILAS.map((fila, fi) => (
-              fila.sec
-                ? <div key={fi} style={{
-                    height:34,display:"flex",alignItems:"center",padding:"0 10px",
-                    marginTop:fi===0?0:8,fontSize:8,fontWeight:700,color:"var(--blue)",
-                    textTransform:"uppercase",letterSpacing:1.5,
-                    borderBottom:"1px solid var(--border)",background:"var(--bg)",
-                  }}>{fila.sec}</div>
-                : <div key={fi} style={{
-                    height:38,display:"flex",alignItems:"center",padding:"0 10px",
-                    fontSize:10,fontWeight:600,color:"var(--muted)",
-                    borderBottom:"1px solid #F3F6FA",
-                  }}>{fila.label}</div>
-            ))}
+      {/* Selector de matriz */}
+      <div className="card" style={{marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}
+          onClick={() => setShowMatrix(m => !m)}>
+          <div className="sec" style={{margin:0,border:0,padding:0}}>
+            Seleccionar combinaciones activas
           </div>
-
-          {/* Columnas de escenarios */}
-          {escenarios.map((esc, ei) => {
-            const isActive = ei === activeIdx;
-            return (
-              <div key={esc.id} style={{
-                width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,
-                borderLeft:"1px solid var(--border)",overflow:"hidden",
-                outline: isActive ? "2px solid var(--blue)" : "none",
-                outlineOffset:-1,
-              }}>
-                {/* Header */}
-                <div style={{
-                  height:52,display:"flex",alignItems:"center",justifyContent:"space-between",
-                  padding:"0 10px",cursor:"pointer",boxSizing:"border-box",width:COL_W,
-                  background: isActive ? "var(--navy)" : "var(--mid)",
-                }} onClick={() => setActiveIdx(ei)}>
-                  <div style={{overflow:"hidden",flex:1}}>
-                    <div style={{fontSize:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap",
-                      overflow:"hidden",textOverflow:"ellipsis"}}>
-                      {icono} {nombreEscenario(esc, puertos)}
-                    </div>
-                    <div style={{fontSize:8,color:"rgba(255,255,255,.5)",fontFamily:"var(--mono)",
-                      textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>
-                      {esc.operaciones_anio||0} op/año
-                    </div>
-                  </div>
-                  <button onClick={ev => { ev.stopPropagation(); eliminar(ei); }}
-                    style={{background:"rgba(255,255,255,.15)",border:"none",color:"rgba(255,255,255,.7)",
-                      fontSize:10,borderRadius:4,padding:"2px 6px",cursor:"pointer",flexShrink:0,marginLeft:4}}>
-                    ✕
-                  </button>
-                </div>
-
-                {/* Filas */}
-                {FILAS.map((fila, fi) => (
-                  fila.sec
-                    ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,
-                        background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
-                    : <div key={fi} style={{
-                        height:38,display:"flex",alignItems:"center",
-                        padding:"0 6px",borderBottom:"1px solid #F3F6FA",
-                        width:COL_W,boxSizing:"border-box",overflow:"hidden",
-                      }}>
-                        {fila.render(esc, ei)}
-                      </div>
-                ))}
-
-                {/* Footer */}
-                <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
-                  <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
-                    onClick={() => guardar(ei)} disabled={saving}>
-                    {saving ? "..." : "Guardar"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Columna agregar */}
-          {escenarios.length < 20 && (
-            <div style={{width:COL_W,minWidth:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
-              <div style={{height:52,display:"flex",alignItems:"center",justifyContent:"center",
-                background:"var(--bg)"}}>
-                <button className="sel-btn add" onClick={nuevoEscenario} disabled={saving} style={{margin:0}}>
-                  + Nuevo escenario
-                </button>
-              </div>
-            </div>
-          )}
+          <span style={{fontSize:11,color:"var(--muted)",fontWeight:600}}>
+            {escenarios.length} activas · {showMatrix?"▲ Cerrar":"▼ Abrir"}
+          </span>
         </div>
+
+        {showMatrix && (
+          <div style={{marginTop:12,overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",fontSize:10,width:"100%"}}>
+              <thead>
+                <tr>
+                  <th style={{textAlign:"left",padding:"4px 8px",color:"var(--muted)",fontWeight:700,
+                    fontSize:8,textTransform:"uppercase",letterSpacing:.5,borderBottom:"1px solid var(--border)"}}>
+                    Barco / Puerto / Zona
+                  </th>
+                  {ZONAS_LIST.map(z => (
+                    <th key={z.value} style={{padding:"4px 12px",color:"var(--blue)",fontWeight:700,
+                      fontSize:8,textTransform:"uppercase",letterSpacing:.5,
+                      borderBottom:"1px solid var(--border)",textAlign:"center"}}>
+                      {z.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {barcos.map(b => (
+                  puertos.map((p, pi) => {
+                    const esFirstPuerto = pi === 0;
+                    return (
+                      <tr key={`${b.id}-${p.id}`} style={{borderBottom:"1px solid #F3F6FA"}}>
+                        <td style={{padding:"6px 8px",verticalAlign:"middle"}}>
+                          {esFirstPuerto && (
+                            <div style={{fontSize:9,fontWeight:700,color:"var(--navy)",marginBottom:2}}>
+                              🚢 {b.nombre}
+                            </div>
+                          )}
+                          <div style={{fontSize:10,color:"var(--muted)",paddingLeft: esFirstPuerto?8:0}}>
+                            🏗️ {p.nombre}
+                          </div>
+                        </td>
+                        {ZONAS_LIST.map(z => {
+                          const key = `${b.id}__${p.id}__${z.value}`;
+                          const activo = escenarios.some(e => matrixKey(e) === key);
+                          return (
+                            <td key={z.value} style={{textAlign:"center",padding:"4px 12px"}}>
+                              <div
+                                onClick={() => !saving && toggleCombinacion(b.id, p.id, z.value)}
+                                style={{
+                                  width:22,height:22,borderRadius:6,margin:"0 auto",cursor:"pointer",
+                                  display:"flex",alignItems:"center",justifyContent:"center",
+                                  background: activo ? "var(--navy)" : "var(--bg)",
+                                  border: `2px solid ${activo ? "var(--navy)" : "var(--border)"}`,
+                                  transition:"all .15s",
+                                }}
+                              >
+                                {activo && <span style={{color:"#fff",fontSize:12,fontWeight:800}}>✓</span>}
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Tabla de sensibilidad del escenario activo */}
-      {escenarios.length > 0 && (
-        <div className="card">
-          <div className="sec">
-            Sensibilidad por velocidad —&nbsp;
-            <span style={{color:"var(--navy)",fontWeight:800,textTransform:"none",letterSpacing:0}}>
-              {activeEsc ? nombreEscenario(activeEsc, puertos) : ""}
-            </span>
+      {/* Columnas de escenarios activos */}
+      {escenarios.length === 0 ? (
+        <div className="empty-state">
+          Abrí el selector de arriba y tildá las combinaciones que querés analizar.
+        </div>
+      ) : (
+        <>
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16}}>
+            <div style={{display:"flex",width:"max-content"}}>
+
+              {/* Etiquetas */}
+              <div style={{width:170,minWidth:170,flexShrink:0,paddingTop:52}}>
+                {FILAS.map((fila, fi) => (
+                  fila.sec
+                    ? <div key={fi} style={{
+                        height:34,display:"flex",alignItems:"center",padding:"0 10px",
+                        marginTop:fi===0?0:8,fontSize:8,fontWeight:700,color:"var(--blue)",
+                        textTransform:"uppercase",letterSpacing:1.5,
+                        borderBottom:"1px solid var(--border)",background:"var(--bg)",
+                      }}>{fila.sec}</div>
+                    : <div key={fi} style={{
+                        height:38,display:"flex",alignItems:"center",padding:"0 10px",
+                        fontSize:10,fontWeight:600,color:"var(--muted)",
+                        borderBottom:"1px solid #F3F6FA",
+                      }}>{fila.label}</div>
+                ))}
+              </div>
+
+              {/* Columna por escenario activo */}
+              {escenarios.map(esc => {
+                const key = matrixKey(esc);
+                const isActive = key === activeKey;
+                const barco  = barcos.find(b => b.id === esc.barco_id);
+                return (
+                  <div key={key} style={{
+                    width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,
+                    borderLeft:"1px solid var(--border)",overflow:"hidden",
+                    outline: isActive ? "2px solid var(--blue)" : "none",
+                    outlineOffset:-1,
+                  }}>
+                    {/* Header */}
+                    <div style={{
+                      height:52,display:"flex",alignItems:"center",justifyContent:"space-between",
+                      padding:"0 10px",cursor:"pointer",boxSizing:"border-box",width:COL_W,
+                      background: isActive ? "var(--navy)" : "var(--mid)",
+                    }} onClick={() => setActiveKey(key)}>
+                      <div style={{overflow:"hidden",flex:1}}>
+                        <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,.6)",
+                          fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.5}}>
+                          🚢 {barco?.nombre||"—"}
+                        </div>
+                        <div style={{fontSize:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap",
+                          overflow:"hidden",textOverflow:"ellipsis",marginTop:1}}>
+                          {icono} {nombreEscenario(esc, puertos)}
+                        </div>
+                      </div>
+                      <div style={{fontSize:8,color:"rgba(255,255,255,.5)",fontFamily:"var(--mono)",
+                        flexShrink:0,marginLeft:4,textAlign:"right"}}>
+                        {esc.operaciones_anio||0}<br/>op/año
+                      </div>
+                    </div>
+
+                    {/* Filas */}
+                    {FILAS.map((fila, fi) => (
+                      fila.sec
+                        ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,
+                            background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
+                        : <div key={fi} style={{
+                            height:38,display:"flex",alignItems:"center",
+                            padding:"0 6px",borderBottom:"1px solid #F3F6FA",
+                            width:COL_W,boxSizing:"border-box",overflow:"hidden",
+                          }}>
+                            {fila.render(esc, key)}
+                          </div>
+                    ))}
+
+                    {/* Footer */}
+                    <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
+                      <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
+                        onClick={() => guardar(key)} disabled={saving}>
+                        {saving?"...":"Guardar"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
-          {(!activeBarco || !activePuerto) ? (
-            <div className="empty-state" style={{padding:20}}>
-              Seleccioná barco y puerto en este escenario para ver el análisis.
+          {/* Tabla de sensibilidad */}
+          <div className="card">
+            <div className="sec">
+              Sensibilidad por velocidad —&nbsp;
+              <span style={{color:"var(--navy)",fontWeight:800,textTransform:"none",letterSpacing:0}}>
+                {activeEsc ? `🚢 ${activeBarco?.nombre||"—"} · ${nombreEscenario(activeEsc,puertos)}` : ""}
+              </span>
             </div>
-          ) : resultadosPorVel.length === 0 ? (
-            <div className="empty-state" style={{padding:20}}>Sin datos de consumo para este barco.</div>
-          ) : (
-            <>
-              <div style={{overflowX:"auto"}}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Vel. (kn)</th><th>Dist. (nm)</th><th>Hs. nav.</th>
-                      <th>Días emb. ↑</th><th>Combustible</th><th>Lubricante</th>
-                      <th>Tripulación</th><th>Puerto</th><th>Total costos</th>
-                      <th>Ingreso</th><th style={{fontWeight:800}}>Resultado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resultadosPorVel.map((r, i) => {
-                      const esMejor = r.resultado === Math.max(...resultadosPorVel.map(x => x.resultado));
-                      return (
-                        <tr key={i} style={{background: esMejor ? "var(--green-bg)" : "transparent"}}>
-                          <td style={{fontWeight:700,textAlign:"center"}}>{r.velocidad}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.dist}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.hsNavIda.toFixed(1)}</td>
-                          <td style={{textAlign:"center",fontWeight:700,color:"var(--navy)",fontFamily:"var(--mono)"}}>{r.totalDiasEmbarcados}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalCombustible)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalLubricante)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoTrip)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoPuerto)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color:"var(--red)"}}>{fmtCompact(r.totalCostos)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{fmtCompact(r.ingreso)}</td>
-                          <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,
-                            color: r.resultado>=0?"var(--green)":"var(--red)"}}>{fmtCompact(r.resultado)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            {(!activeBarco||!activePuerto) ? (
+              <div className="empty-state" style={{padding:20}}>
+                Hacé click en una columna para ver su análisis de velocidad.
               </div>
-              <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
-                * Verde = velocidad óptima · Días redondeados ↑ · VLSFO {fmtUSD(activePuerto.precio_vlsfo||1000)}/Tn · Lub {fmtUSD(activePuerto.precio_lubricante||2200)}/drum
-              </p>
-            </>
-          )}
-        </div>
-      )}
-
-      {escenarios.length === 0 && (
-        <div className="empty-state">No hay escenarios. Creá uno para empezar.</div>
+            ) : resultadosPorVel.length === 0 ? (
+              <div className="empty-state" style={{padding:20}}>Sin datos de consumo para este barco.</div>
+            ) : (
+              <>
+                <div style={{overflowX:"auto"}}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Vel.</th><th>Dist.</th><th>Hs. nav.</th>
+                        <th>Días ↑</th><th>Combustible</th><th>Lubricante</th>
+                        <th>Tripulación</th><th>Puerto</th><th>Total costos</th>
+                        <th>Ingreso</th><th>Resultado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultadosPorVel.map((r, i) => {
+                        const mejor = r.resultado === Math.max(...resultadosPorVel.map(x=>x.resultado));
+                        return (
+                          <tr key={i} style={{background:mejor?"var(--green-bg)":"transparent"}}>
+                            <td style={{fontWeight:700,textAlign:"center"}}>{r.velocidad}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.dist}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.hsNavIda.toFixed(1)}</td>
+                            <td style={{textAlign:"center",fontWeight:700,color:"var(--navy)",fontFamily:"var(--mono)"}}>{r.totalDiasEmbarcados}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalCombustible)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalLubricante)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoTrip)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoPuerto)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color:"var(--red)"}}>{fmtCompact(r.totalCostos)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{fmtCompact(r.ingreso)}</td>
+                            <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,
+                              color:r.resultado>=0?"var(--green)":"var(--red)"}}>{fmtCompact(r.resultado)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
+                  * Verde = velocidad óptima · VLSFO {fmtUSD(activePuerto.precio_vlsfo||1000)}/Tn · Lub {fmtUSD(activePuerto.precio_lubricante||2200)}/drum
+                  {isAlije && " · Ingreso usa modalidad Mob/Demob · * Día desde zarpe es estimado sin días de navegación"}
+                </p>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
