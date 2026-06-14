@@ -928,8 +928,6 @@ const PUERTO_DEFAULT = {
   costo_estiba_hora: 0,
   costo_estiba_dia: 0,
   costo_estiba_tn: 0,
-  costo_grua_hora: 0,
-  costo_grua_operacion: 0,
   costo_agua_m3: 0,
   costo_slop_m3: 0,
   costo_bunker_operacion: 0,
@@ -998,8 +996,6 @@ function TabPuertos() {
         costo_estiba_hora: puerto.costo_estiba_hora,
         costo_estiba_dia: puerto.costo_estiba_dia,
         costo_estiba_tn: puerto.costo_estiba_tn,
-        costo_grua_hora: puerto.costo_grua_hora,
-        costo_grua_operacion: puerto.costo_grua_operacion,
         costo_agua_m3: puerto.costo_agua_m3,
         costo_slop_m3: puerto.costo_slop_m3,
         costo_bunker_operacion: puerto.costo_bunker_operacion,
@@ -1083,38 +1079,36 @@ function TabPuertos() {
     { label: "Zona Delta",                   render: (p, i) => (
         <input className="field-input" type="number" value={p.dist_zona_delta??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_delta:parseNum(e.target.value)}:x)); }} />
     )},
-    { sec: "③ Costos operativos (USD)",      items: null },
-    { label: "Portuario / día",              render: (p, i) => (
+    { sec: "③ Costos fijos (USD/mes)",        items: null },
+    { label: "Amarre / mes",                  render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_portuario_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_portuario_dia:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba / operación (USD)",     render: (p, i) => (
+    { label: "Amarre anual (× 12)",           render: (p) => (
+        <input className="field-formula" readOnly value={fmtUSD((p.costo_portuario_dia||0)*12)} />
+    )},
+    { sec: "④ Costos variables por operación", items: null },
+    { label: "Estiba / operación (USD)",      render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_estiba??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba / hora (USD/hs)",       render: (p, i) => (
+    { label: "Estiba / hora (USD/hs)",        render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_estiba_hora??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_hora:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba / día (USD/día)",       render: (p, i) => (
+    { label: "Estiba / día (USD/día)",        render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_estiba_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_dia:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Estiba / tonelada (USD/Tn)",   render: (p, i) => (
+    { label: "Estiba / tonelada (USD/Tn)",    render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_estiba_tn??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba_tn:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Grúa / hora (USD/hs)",         render: (p, i) => (
-        <input className="field-input" type="number" value={p.costo_grua_hora??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_grua_hora:parseNum(e.target.value)}:x)); }} />
-    )},
-    { label: "Grúa / operación (USD)",       render: (p, i) => (
-        <input className="field-input" type="number" value={p.costo_grua_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_grua_operacion:parseNum(e.target.value)}:x)); }} />
-    )},
-    { label: "Compra agua (USD/m³)",         render: (p, i) => (
+    { label: "Compra agua (USD/m³)",          render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_agua_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_agua_m3:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Descarga slop (USD/m³)",       render: (p, i) => (
+    { label: "Descarga slop (USD/m³)",        render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_slop_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_slop_m3:parseNum(e.target.value)}:x)); }} />
     )},
-    { label: "Bunker / operación",           render: (p, i) => (
+    { label: "Bunker / operación",            render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_bunker_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_bunker_operacion:parseNum(e.target.value)}:x)); }} />
     )},
-    { sec: "④ Costos indirectos",            items: null },
+    { sec: "⑤ Costos indirectos",            items: null },
     { label: "Lump sum mensual (USD)",       render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_indirecto_lumpsum??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_indirecto_lumpsum:parseNum(e.target.value)}:x)); }} />
     )},
@@ -1647,11 +1641,12 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
     const diasEnPuerto = Math.max(0, diasDisponibles - diasOperativos);
     const costoCombPuertoAnual = diasEnPuerto * (costoCombPuerto + costoLubPuerto);
     const costoTripPuertoAnual = diasEnPuerto * tripPuerto;
-    const costoPuertoBase = diasEnPuerto * (puerto.costo_portuario_dia || 0);
+    // costo_portuario_dia es amarre mensual — se suma al OPEX fijo anual (× 12)
+    const costoAmarreMensual = (puerto.costo_portuario_dia || 0) * 12;
 
-    opexVariable += costoCombPuertoAnual + costoTripPuertoAnual + costoPuertoBase;
+    opexVariable += costoCombPuertoAnual + costoTripPuertoAnual;
 
-    const opexTotal = opexFijoBase + opexVariable + costoDrydock;
+    const opexTotal = opexFijoBase + opexVariable + costoDrydock + costoAmarreMensual;
 
     // D&A
     const capexTotal = (barco.precio_compra || 0) * (1 + (barco.arancel_pct || 0) / 100) + (barco.capex_refit || 0);
@@ -2366,9 +2361,8 @@ function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocida
   const tripDia = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0) * (r.costo_dia_navegando || 0), 0);
   const costoTrip = totalDiasEmbarcados * tripDia;
 
-  // Costos puerto
-  const costoPuerto = (puerto.costo_portuario_dia || 0) * Math.ceil(diasAlist)
-                    + (puerto.costo_estiba || 0)
+  // Costos puerto por operación (amarre es fijo mensual, no se carga por viaje)
+  const costoPuerto = (puerto.costo_estiba || 0)
                     + (puerto.costo_bunker_operacion || 0);
 
   // Costos específicos servicio
