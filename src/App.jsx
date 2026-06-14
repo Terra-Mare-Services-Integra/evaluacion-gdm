@@ -938,7 +938,6 @@ const PUERTO_DEFAULT = {
 
 function TabPuertos() {
   const [puertos, setPuertos]   = useState([]);
-  const [selIdx, setSelIdx]     = useState(0);
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -965,10 +964,8 @@ function TabPuertos() {
           .from(TABLE_PUERTOS).insert(seeds).select();
         if (e2) throw e2;
         setPuertos(nuevos.sort((a, b) => a.orden - b.orden));
-        setSelIdx(0);
       } else {
         setPuertos(data);
-        setSelIdx(0);
       }
     } catch (e) {
       showMsg("err", `Error al cargar puertos: ${e.message}`);
@@ -979,12 +976,8 @@ function TabPuertos() {
 
   useEffect(() => { loadPuertos(); }, [loadPuertos]);
 
-  const set = useCallback((k, v) => {
-    setPuertos(prev => prev.map((p, i) => i === selIdx ? { ...p, [k]: v } : p));
-  }, [selIdx]);
-
-  const guardar = async () => {
-    const puerto = puertos[selIdx];
+  const guardar = async (idx) => {
+    const puerto = puertos[idx];
     if (!puerto) return;
     setSaving(true);
     try {
@@ -1008,9 +1001,25 @@ function TabPuertos() {
         restriccion_viento: puerto.restriccion_viento,
       }).eq("id", puerto.id);
       if (error) throw error;
-      showMsg("ok", "Puerto guardado correctamente.");
+      showMsg("ok", `"${puerto.nombre}" guardado.`);
     } catch (e) {
       showMsg("err", `No se pudo guardar: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const eliminar = async (idx) => {
+    const puerto = puertos[idx];
+    if (!puerto) return;
+    setSaving(true);
+    try {
+      const { error } = await supabase.from(TABLE_PUERTOS).delete().eq("id", puerto.id);
+      if (error) throw error;
+      setPuertos(prev => prev.filter((_, i) => i !== idx));
+      showMsg("ok", "Puerto eliminado.");
+    } catch (e) {
+      showMsg("err", `No se pudo eliminar: ${e.message}`);
     } finally {
       setSaving(false);
     }
@@ -1025,7 +1034,7 @@ function TabPuertos() {
         .insert({ ...PUERTO_DEFAULT, nombre: `Puerto ${puertos.length + 1}`, orden: puertos.length })
         .select().single();
       if (error) throw error;
-      setPuertos(prev => { const u = [...prev, data]; setSelIdx(u.length - 1); return u; });
+      setPuertos(prev => [...prev, data]);
     } catch (e) {
       showMsg("err", `No se pudo crear el puerto: ${e.message}`);
     } finally {
@@ -1033,127 +1042,166 @@ function TabPuertos() {
     }
   };
 
-  const eliminar = async () => {
-    const puerto = puertos[selIdx];
-    if (!puerto) return;
-    if (!window.confirm(`¿Eliminar "${puerto.nombre}"? Esta acción no se puede deshacer.`)) return;
-    setSaving(true);
-    try {
-      const { error } = await supabase.from(TABLE_PUERTOS).delete().eq("id", puerto.id);
-      if (error) throw error;
-      setPuertos(prev => { const u = prev.filter((_, i) => i !== selIdx); setSelIdx(Math.max(0, selIdx - 1)); return u; });
-      showMsg("ok", "Puerto eliminado.");
-    } catch (e) {
-      showMsg("err", `No se pudo eliminar: ${e.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading) return <div className="empty-state">Cargando puertos...</div>;
+  if (puertos.length === 0) return <div className="empty-state">No hay puertos cargados.</div>;
 
-  const puerto = puertos[selIdx];
-  if (!puerto) return <div className="empty-state">No hay puertos cargados.</div>;
+  // Ancho fijo por columna — 4 caben en ~1200px (laptop 14")
+  const COL_W = 232;
+
+  const FILAS = [
+    { sec: "① Identidad",                   items: null }, // header de sección
+    { label: "Nombre",                       render: (p, i) => (
+        <input className="tbl-input" value={p.nombre || ""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nombre:e.target.value}:x)); }} />
+    )},
+    { label: "Estado",                       render: (p, i) => (
+        <select className="tbl-input" value={p.activo?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,activo:e.target.value==="true"}:x)); }}>
+          <option value="true">Activo</option>
+          <option value="false">Inactivo</option>
+        </select>
+    )},
+    { sec: "② Distancias (nm)",              items: null },
+    { label: "Zona Común",                   render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.dist_zona_comun??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_comun:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Zona Alfa",                    render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.dist_zona_alfa??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_alfa:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Zona Delta",                   render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.dist_zona_delta??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_delta:parseNum(e.target.value)}:x)); }} />
+    )},
+    { sec: "③ Costos operativos (USD)",      items: null },
+    { label: "Portuario / día",              render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_portuario_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_portuario_dia:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Estiba / operación",           render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_estiba??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Compra agua (USD/m³)",         render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_agua_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_agua_m3:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Descarga slop (USD/m³)",       render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_slop_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_slop_m3:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Bunker / operación",           render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_bunker_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_bunker_operacion:parseNum(e.target.value)}:x)); }} />
+    )},
+    { sec: "④ Costos indirectos",            items: null },
+    { label: "Lump sum mensual (USD)",       render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.costo_indirecto_lumpsum??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_indirecto_lumpsum:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Anual (× 12)",                render: (p) => (
+        <input className="tbl-formula" readOnly value={fmtUSD((p.costo_indirecto_lumpsum||0)*12)} />
+    )},
+    { label: "Nota / descripción",           render: (p, i) => (
+        <input className="tbl-input" value={p.nota_indirectos||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nota_indirectos:e.target.value}:x)); }} placeholder="—" />
+    )},
+    { sec: "⑤ Condiciones operativas",       items: null },
+    { label: "Calado máx. (m)",             render: (p, i) => (
+        <input className="tbl-input" type="number" step="0.1" value={p.calado_max_m??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,calado_max_m:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Horas operativas / día",       render: (p, i) => (
+        <input className="tbl-input" type="number" value={p.horas_operativas??24} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,horas_operativas:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Espera promedio (hs)",         render: (p, i) => (
+        <input className="tbl-input" type="number" step="0.5" value={p.espera_promedio_hs??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,espera_promedio_hs:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Grúa disponible",              render: (p, i) => (
+        <select className="tbl-input" value={p.tiene_grua?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,tiene_grua:e.target.value==="true"}:x)); }}>
+          <option value="false">No</option>
+          <option value="true">Sí</option>
+        </select>
+    )},
+    { label: "Restricción viento / clima",   render: (p, i) => (
+        <input className="tbl-input" value={p.restriccion_viento||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,restriccion_viento:e.target.value}:x)); }} placeholder="—" />
+    )},
+  ];
 
   return (
     <div>
       {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
 
-      <div className="selector">
-        {puertos.map((p, i) => (
-          <button key={p.id} className={`sel-btn ${i === selIdx ? "on" : ""}`} onClick={() => setSelIdx(i)}>
-            🏗️ {p.nombre}
-          </button>
-        ))}
-        {puertos.length < 5 && (
-          <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}>+ Nuevo puerto</button>
-        )}
-      </div>
+      {/* Scroll container */}
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        <div style={{minWidth: 200 + COL_W * puertos.length, display:"flex", gap:0}}>
 
-      <div className="g2">
-        <div className="card">
-          <div className="sec">① Identidad</div>
-          <div className="g2">
-            <div className="campo"><div className="campo-label">Nombre</div>
-              <input className="campo-input" value={puerto.nombre || ""} onChange={e => set("nombre", e.target.value)} /></div>
-            <div className="campo"><div className="campo-label">Estado</div>
-              <select className="campo-input" value={puerto.activo ? "true" : "false"} onChange={e => set("activo", e.target.value === "true")}>
-                <option value="true">Activo</option>
-                <option value="false">Inactivo</option>
-              </select>
+          {/* Columna de etiquetas — sticky left */}
+          <div style={{width:200,flexShrink:0,paddingTop:48}}>
+            {FILAS.map((fila, fi) => (
+              fila.sec
+                ? <div key={fi} style={{
+                    height:34,display:"flex",alignItems:"center",
+                    padding:"0 10px",marginTop: fi===0?0:8,
+                    fontSize:8,fontWeight:700,color:"var(--blue)",
+                    textTransform:"uppercase",letterSpacing:1.5,
+                    borderBottom:"1px solid var(--border)",
+                    background:"var(--bg)",
+                  }}>{fila.sec}</div>
+                : <div key={fi} style={{
+                    height:38,display:"flex",alignItems:"center",
+                    padding:"0 10px",
+                    fontSize:10,fontWeight:600,color:"var(--muted)",
+                    borderBottom:"1px solid #F3F6FA",
+                  }}>{fila.label}</div>
+            ))}
+          </div>
+
+          {/* Columnas de puertos */}
+          {puertos.map((p, pi) => (
+            <div key={p.id} style={{width:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
+              {/* Header columna */}
+              <div style={{
+                height:48,display:"flex",alignItems:"center",justifyContent:"space-between",
+                padding:"0 10px",
+                background: p.activo ? "var(--navy)" : "var(--muted)",
+                borderRadius:"8px 8px 0 0",
+              }}>
+                <span style={{fontSize:11,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  🏗️ {p.nombre}
+                </span>
+                {puertos.length > 1 && (
+                  <button
+                    onClick={() => { if (window.confirm(`¿Eliminar "${p.nombre}"?`)) eliminar(pi); }}
+                    disabled={saving}
+                    style={{background:"rgba(255,255,255,.15)",border:"none",color:"rgba(255,255,255,.7)",
+                      fontSize:10,borderRadius:4,padding:"2px 6px",cursor:"pointer",flexShrink:0,marginLeft:4}}
+                  >✕</button>
+                )}
+              </div>
+
+              {/* Filas de datos */}
+              {FILAS.map((fila, fi) => (
+                fila.sec
+                  ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
+                  : <div key={fi} style={{
+                      height:38,display:"flex",alignItems:"center",
+                      padding:"0 6px",borderBottom:"1px solid #F3F6FA",
+                    }}>
+                      {fila.render(p, pi)}
+                    </div>
+              ))}
+
+              {/* Footer con botón guardar */}
+              <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
+                <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
+                  onClick={() => guardar(pi)} disabled={saving}>
+                  {saving ? "..." : "Guardar"}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
+          ))}
 
-        <div className="card">
-          <div className="sec">② Distancias a zonas de trabajo (nm)</div>
-          <div className="g3">
-            <div className="campo"><div className="campo-label">Zona Común</div>
-              <input className="campo-input" type="number" value={puerto.dist_zona_comun ?? 0} onChange={e => set("dist_zona_comun", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Zona Alfa</div>
-              <input className="campo-input" type="number" value={puerto.dist_zona_alfa ?? 0} onChange={e => set("dist_zona_alfa", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Zona Delta</div>
-              <input className="campo-input" type="number" value={puerto.dist_zona_delta ?? 0} onChange={e => set("dist_zona_delta", parseNum(e.target.value))} /></div>
-          </div>
-        </div>
-      </div>
+          {/* Columna "Agregar" */}
+          {puertos.length < 5 && (
+            <div style={{width:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
+              <div style={{height:48,display:"flex",alignItems:"center",justifyContent:"center",
+                background:"var(--bg)",borderRadius:"8px 8px 0 0"}}>
+                <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}
+                  style={{margin:0}}>+ Nuevo puerto</button>
+              </div>
+            </div>
+          )}
 
-      <div className="g2">
-        <div className="card">
-          <div className="sec">③ Costos operativos (USD)</div>
-          <div className="g2">
-            <div className="campo"><div className="campo-label">Costo portuario (por día)</div>
-              <input className="campo-input" type="number" value={puerto.costo_portuario_dia ?? 0} onChange={e => set("costo_portuario_dia", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Costo estiba (por operación)</div>
-              <input className="campo-input" type="number" value={puerto.costo_estiba ?? 0} onChange={e => set("costo_estiba", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Agua (USD/m³)</div>
-              <input className="campo-input" type="number" value={puerto.costo_agua_m3 ?? 0} onChange={e => set("costo_agua_m3", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Slop (USD/m³)</div>
-              <input className="campo-input" type="number" value={puerto.costo_slop_m3 ?? 0} onChange={e => set("costo_slop_m3", parseNum(e.target.value))} /></div>
-            <div className="campo"><div className="campo-label">Bunker (por operación)</div>
-              <input className="campo-input" type="number" value={puerto.costo_bunker_operacion ?? 0} onChange={e => set("costo_bunker_operacion", parseNum(e.target.value))} /></div>
-          </div>
         </div>
-
-        <div className="card">
-          <div className="sec">④ Costos indirectos</div>
-          <div className="campo"><div className="campo-label">Lump sum mensual (USD)</div>
-            <input className="campo-input" type="number" value={puerto.costo_indirecto_lumpsum ?? 0} onChange={e => set("costo_indirecto_lumpsum", parseNum(e.target.value))} /></div>
-          <div className="campo" style={{marginTop:6}}><div className="campo-label">Descripción / nota</div>
-            <textarea className="campo-input" rows={3} value={puerto.nota_indirectos || ""}
-              onChange={e => set("nota_indirectos", e.target.value)}
-              style={{resize:"vertical",fontFamily:"var(--sans)",fontSize:12}} /></div>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="sec">⑤ Restricciones y condiciones operativas</div>
-        <div className="g4">
-          <div className="campo"><div className="campo-label">Calado máx. (m)</div>
-            <input className="campo-input" type="number" step="0.1" value={puerto.calado_max_m ?? 0} onChange={e => set("calado_max_m", parseNum(e.target.value))} /></div>
-          <div className="campo"><div className="campo-label">Horas operativas / día</div>
-            <input className="campo-input" type="number" value={puerto.horas_operativas ?? 24} onChange={e => set("horas_operativas", parseNum(e.target.value))} /></div>
-          <div className="campo"><div className="campo-label">Espera promedio (hs)</div>
-            <input className="campo-input" type="number" step="0.5" value={puerto.espera_promedio_hs ?? 0} onChange={e => set("espera_promedio_hs", parseNum(e.target.value))} /></div>
-          <div className="campo"><div className="campo-label">Grúa disponible</div>
-            <select className="campo-input" value={puerto.tiene_grua ? "true" : "false"} onChange={e => set("tiene_grua", e.target.value === "true")}>
-              <option value="false">No</option>
-              <option value="true">Sí</option>
-            </select>
-          </div>
-        </div>
-        <div className="campo" style={{marginTop:4}}><div className="campo-label">Restricciones de viento / clima</div>
-          <input className="campo-input" value={puerto.restriccion_viento || ""} onChange={e => set("restriccion_viento", e.target.value)}
-            placeholder="Ej: Operación suspendida con viento > 25 kn" /></div>
-      </div>
-
-      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
-        {puertos.length > 1 && (
-          <button className="btn btn-danger" onClick={eliminar} disabled={saving}>Eliminar puerto</button>
-        )}
-        <button className="btn btn-primary" onClick={guardar} disabled={saving}>
-          {saving ? "Guardando..." : "Guardar puerto"}
-        </button>
       </div>
     </div>
   );
