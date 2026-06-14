@@ -2044,11 +2044,17 @@ const nombreEscenario = (esc, puertos) => {
 };
 
 // ─── TAB SERVICIO GENÉRICA ─────────────────────────────────────────────────
-const ZONAS_LIST = [
+const ZONAS_LIST_ALL = [
   { value: "zona_comun", label: "Zona Común" },
   { value: "zona_alfa",  label: "Zona Alfa"  },
   { value: "zona_delta", label: "Zona Delta" },
 ];
+const ZONAS_POR_SERVICIO = {
+  alije:       [{ value: "zona_alfa", label: "Zona Alfa" }, { value: "zona_delta", label: "Zona Delta" }],
+  agua:        ZONAS_LIST_ALL,
+  slop:        ZONAS_LIST_ALL,
+  lubricantes: ZONAS_LIST_ALL,
+};
 
 function TabServicio({ tipoServicio, titulo, icono }) {
   const [escenarios, setEscenarios]                   = useState([]);
@@ -2212,7 +2218,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         <input className="field-input" type="number" min="0" step="0.5" value={e.dias_operacion??1}
           onChange={ev => setField(key,"dias_operacion",parseNum(ev.target.value))} />
     )},
-    { label: "Operaciones / año", render: (e, key) => (
+    { label: "Mercado total (op/año)", render: (e, key) => (
         <input className="field-input" type="number" min="0" value={e.operaciones_anio??0}
           onChange={ev => setField(key,"operaciones_anio",parseNum(ev.target.value))} />
     )},
@@ -2283,7 +2289,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
   const todasCombinaciones = [];
   for (const b of barcos)
     for (const p of puertos)
-      for (const z of ZONAS_LIST)
+      for (const z of (ZONAS_POR_SERVICIO[tipoServicio]||ZONAS_LIST_ALL))
         todasCombinaciones.push({ barco: b, puerto: p, zona: z });
 
   return (
@@ -2311,7 +2317,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                     fontSize:8,textTransform:"uppercase",letterSpacing:.5,borderBottom:"1px solid var(--border)"}}>
                     Barco / Puerto / Zona
                   </th>
-                  {ZONAS_LIST.map(z => (
+                  {(ZONAS_POR_SERVICIO[tipoServicio]||ZONAS_LIST_ALL).map(z => (
                     <th key={z.value} style={{padding:"4px 12px",color:"var(--blue)",fontWeight:700,
                       fontSize:8,textTransform:"uppercase",letterSpacing:.5,
                       borderBottom:"1px solid var(--border)",textAlign:"center"}}>
@@ -2336,7 +2342,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                             🏗️ {p.nombre}
                           </div>
                         </td>
-                        {ZONAS_LIST.map(z => {
+                        {(ZONAS_POR_SERVICIO[tipoServicio]||ZONAS_LIST_ALL).map(z => {
                           const key = `${b.id}__${p.id}__${z.value}`;
                           const activo = escenarios.some(e => matrixKey(e) === key);
                           return (
@@ -2455,7 +2461,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
             </div>
           </div>
 
-          {/* Tabla de sensibilidad */}
+          {/* Tabla de sensibilidad — solo para servicios donde la velocidad impacta el margen */}
+          {!isAlije && (
           <div className="card">
             <div className="sec">
               Sensibilidad por velocidad —&nbsp;
@@ -2506,11 +2513,11 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                 </div>
                 <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
                   * Verde = velocidad óptima · VLSFO {fmtUSD(activePuerto.precio_vlsfo||1000)}/Tn · Lub {fmtUSD(activePuerto.precio_lubricante||2200)}/drum
-                  {isAlije && " · Ingreso usa modalidad Mob/Demob · * Día desde zarpe es estimado sin días de navegación"}
                 </p>
               </>
             )}
           </div>
+          )} {/* fin !isAlije */}
         </>
       )}
     </div>
