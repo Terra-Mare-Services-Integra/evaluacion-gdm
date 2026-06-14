@@ -2308,36 +2308,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const ingresoMD   = (esc.mob_demob_usd||0)+diasSitio*(esc.tarifa_dia_operando||0);
     const ingresoZarpe= diasTotalFrac*(esc.tarifa_dia_navegando||0);
 
-    // Velocidad óptima: recorre todas las velocidades disponibles y busca la que maximiza resultado
-    let velOptMD = velCrucero, velOptZarpe = velCrucero;
-    if (consumos.length > 0) {
-      let mejorMD = -Infinity, mejorZarpe = -Infinity;
-      for (const fv of consumos) {
-        const vel = fv.velocidad;
-        if (!vel) continue;
-        const dNavIda2  = (dist/vel)/24;
-        const dNavVta2  = dNavIda2;
-        const dTotal2   = (esc.hs_alistamiento||0)/24 + dNavIda2 + diasSitio + dNavVta2 + (esc.hs_desarmado||4)/24;
-        const dEmb2     = Math.ceil(dTotal2);
-        const cL2 = fv.consumo_lastre||0;
-        const cC2 = fv.consumo_carga||0;
-        const lP2 = (fv.lubricante_pct||3)/100;
-        const cIda2 = (tipo === "agua" || tipo === "lubricantes") ? cC2 : cL2;
-        const cVta2 = (tipo === "slop") ? cC2 : cL2;
-        const tComb2 = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * pvlsfo
-                     + dNavIda2 * cIda2 * pvlsfo + dNavVta2 * cVta2 * pvlsfo;
-        const tLub2  = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * lubPtoPct * plub
-                     + dNavIda2 * cIda2 * lP2 * plub + dNavVta2 * cVta2 * lP2 * plub;
-        const tTrip2 = dEmb2 * costoDiaTripNav;
-        const tCost2 = tComb2+tLub2+tTrip2+costoViveres+costoZarpe+costoArribo+costoOpVar;
-        const rMD2    = ingresoMD - tCost2;
-        const ingZ2   = dTotal2 * (esc.tarifa_dia_navegando||0);
-        const rZ2     = ingZ2 - tCost2;
-        if (rMD2    > mejorMD)    { mejorMD    = rMD2;    velOptMD    = vel; }
-        if (rZ2     > mejorZarpe) { mejorZarpe = rZ2;     velOptZarpe = vel; }
-      }
-    }
-
     return {
       dist, velCrucero, pvlsfo, plub, dotacion,
       diasAlist, diasDesarm, diasNavIda, diasNavVta, diasSitio, diasTotalFrac, diasEmb,
@@ -2347,7 +2317,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
       costoEstibaOp, costoEstibaHs, costoEstibaDia, costoEstibaTn, costoBunker,
       totalCostos, ingresoMD, ingresoZarpe,
       resultMD: ingresoMD - totalCostos, resultZarpe: ingresoZarpe - totalCostos,
-      velOptMD, velOptZarpe,
       puerto,
     };
   };
@@ -2413,9 +2382,9 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     // Desglose operacional — filas calculadas por escenario
     { sec: "④ Tiempos y combustible" },
     { label: "Alistamiento",      calc: (d) => d ? `${fmtDec(d.diasAlist,2)}d · ${fmtCompact(d.combAlist+d.lubAlist)}` : "—" },
-    { label: "Navegación ida",    calc: (d) => d ? `${fmtDec(d.diasNavIda,2)}d · ${fmtCompact(d.combIda+d.lubIda)} · 🏎 MD:${d.velOptMD}kn Z:${d.velOptZarpe}kn` : "—" },
+    { label: "Navegación ida",    calc: (d) => d ? `${fmtDec(d.diasNavIda,2)}d · ${fmtCompact(d.combIda+d.lubIda)} · ${d.velCrucero}kn` : "—" },
     { label: "Operación sitio",   calc: (d) => d ? `${fmtDec(d.diasSitio,2)}d · ${fmtCompact(d.combSitio+d.lubSitio)}` : "—" },
-    { label: "Navegación vuelta", calc: (d) => d ? `${fmtDec(d.diasNavVta,2)}d · ${fmtCompact(d.combVta+d.lubVta)} · vel. ref. ${d.velCrucero}kn` : "—" },
+    { label: "Navegación vuelta", calc: (d) => d ? `${fmtDec(d.diasNavVta,2)}d · ${fmtCompact(d.combVta+d.lubVta)} · ${d.velCrucero}kn` : "—" },
     { label: "Desarmado",         calc: (d) => d ? `${fmtDec(d.diasDesarm,2)}d · ${fmtCompact(d.combDesarm+d.lubDesarm)}` : "—" },
     { label: "Días embarcados ↑", calc: (d) => d ? `${d.diasEmb} días` : "—", bold: true },
     { label: "Comb. + Lub. total",calc: (d) => d ? fmtCompact(d.totalComb+d.totalLub) : "—", red: true },
