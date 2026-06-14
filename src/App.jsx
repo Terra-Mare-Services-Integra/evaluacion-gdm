@@ -2283,7 +2283,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const costoTrip = diasEmb * costoDiaTripNav;
 
     const viveresDiaPers = puerto.viveres_dia_persona||0;
-    const costoViveres   = esc.viveres_activo ? diasEmb*dotacion*viveresDiaPers : 0;
+    const costoViveres   = diasEmb * dotacion * viveresDiaPers; // siempre activo
 
     const costoZarpe  = esc.costo_despacho_zarpe  ?? puerto.costo_despacho_zarpe  ?? 0;
     const costoArribo = esc.costo_despacho_arribo ?? puerto.costo_despacho_arribo ?? 0;
@@ -2381,29 +2381,9 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     { label: "Comb. + Lub. total",calc: (d) => d ? fmtCompact(d.totalComb+d.totalLub) : "—", red: true },
     { label: "Tripulación",       calc: (d) => d ? fmtCompact(d.costoTrip) : "—", red: true },
     { sec: "⑤ Costos portuarios" },
-    { label: "Despacho zarpe",  renderCalc: (e, key, d) => d ? (
-        <input className="field-input" type="number" min="0" value={e.costo_despacho_zarpe??0}
-          onChange={ev => setField(key,"costo_despacho_zarpe",parseNum(ev.target.value))} />
-    ) : null },
-    { label: "Despacho arribo", renderCalc: (e, key, d) => d ? (
-        <input className="field-input" type="number" min="0" value={e.costo_despacho_arribo??0}
-          onChange={ev => setField(key,"costo_despacho_arribo",parseNum(ev.target.value))} />
-    ) : null },
-    { label: "Víveres", renderCalc: (e, key, d) => d ? (
-        <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
-          <div onClick={() => setField(key,"viveres_activo",!e.viveres_activo)}
-            style={{width:16,height:16,borderRadius:3,cursor:"pointer",flexShrink:0,
-              display:"flex",alignItems:"center",justifyContent:"center",
-              background:e.viveres_activo?"var(--navy)":"var(--bg)",
-              border:`2px solid ${e.viveres_activo?"var(--navy)":"var(--border)"}`}}>
-            {e.viveres_activo&&<span style={{color:"#fff",fontSize:9,fontWeight:800}}>✓</span>}
-          </div>
-          <span className="field-formula" style={{flex:1,padding:"4px 6px",fontSize:10,
-            color:e.viveres_activo?"var(--red)":"var(--light)"}}>
-            {e.viveres_activo ? fmtCompact(d.costoViveres) : `${d.dotacion}p × ${d.diasEmb}d × $${d.viveresDiaPers}`}
-          </span>
-        </div>
-    ) : null },
+    { label: "Despacho zarpe",  calc: (d) => d ? fmtCompact(d.costoZarpe)  : "—", red: true },
+    { label: "Despacho arribo", calc: (d) => d ? fmtCompact(d.costoArribo) : "—", red: true },
+    { label: "Víveres",         calc: (d) => d ? (d.viveresDiaPers > 0 ? fmtCompact(d.costoViveres) : `${d.dotacion}p × ${d.diasEmb}d × $0`) : "—", red: true },
     { sec: "⑥ Costos op. variables" },
     { label: "Estiba / op.",    renderCalc: (e, key, d) => d ? (
         <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
