@@ -2561,115 +2561,172 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         )}
       </div>
 
-      {/* Columnas de escenarios activos */}
+      {/* Tabla comparativa */}
       {escenarios.length === 0 ? (
         <div className="empty-state">
           Abrí el selector de arriba y tildá las combinaciones que querés analizar.
         </div>
       ) : (
-        <>
-          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16}}>
-            <div style={{display:"flex",width:"max-content"}}>
+        <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16}}>
+          <table style={{borderCollapse:"collapse",tableLayout:"fixed",
+            width: 200 + COL_W * escenarios.length}}>
+            <colgroup>
+              <col style={{width:200}} />
+              {escenarios.map((_,i) => <col key={i} style={{width:COL_W}} />)}
+            </colgroup>
 
-              {/* Etiquetas */}
-              <div style={{width:170,minWidth:170,flexShrink:0,paddingTop:52}}>
-                {FILAS_INPUT.map((fila, fi) => (
-                  fila.sec
-                    ? <div key={fi} style={{
-                        height:34,display:"flex",alignItems:"center",padding:"0 10px",
-                        marginTop:fi===0?0:8,fontSize:8,fontWeight:700,color:"var(--blue)",
-                        textTransform:"uppercase",letterSpacing:1.5,
-                        borderBottom:"1px solid var(--border)",background:"var(--bg)",
-                      }}>{fila.sec}</div>
-                    : <div key={fi} style={{
-                        height:38,display:"flex",alignItems:"center",padding:"0 10px",
-                        fontSize:10,fontWeight: fila.bold?700:600,
-                        color: fila.bold ? "var(--navy)" : "var(--muted)",
-                        borderBottom:"1px solid #F3F6FA",
-                      }}>{fila.label}</div>
-                ))}
-              </div>
+            {/* Header row */}
+            <thead>
+              <tr>
+                <th style={{background:"var(--bg)",border:"1px solid var(--border)",
+                  padding:"0 10px",height:52,verticalAlign:"middle",
+                  fontSize:8,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",
+                  letterSpacing:1}} />
+                {escenarios.map(esc => {
+                  const key = matrixKey(esc);
+                  const isActive = key === activeKey;
+                  const barco = barcos.find(b => b.id === esc.barco_id);
+                  return (
+                    <th key={key}
+                      onClick={() => setActiveKey(key)}
+                      style={{
+                        height:52,padding:"0 10px",cursor:"pointer",
+                        background: isActive ? "var(--navy)" : "var(--mid)",
+                        border: isActive ? "2px solid var(--blue)" : "1px solid var(--border)",
+                        verticalAlign:"middle",textAlign:"left",
+                      }}>
+                      <div style={{fontSize:8,fontWeight:700,color:"rgba(255,255,255,.6)",
+                        fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.5,
+                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                        🚢 {barco?.nombre||"—"}
+                      </div>
+                      <div style={{fontSize:10,fontWeight:700,color:"#fff",
+                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>
+                        {icono} {nombreEscenario(esc, puertos)}
+                      </div>
+                      <div style={{fontSize:8,color:"rgba(255,255,255,.45)",fontFamily:"var(--mono)",marginTop:1}}>
+                        {esc.operaciones_anio||0} op/año
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
 
-              {/* Columna por escenario */}
-              {escenarios.map(esc => {
-                const key = matrixKey(esc);
-                const isActive = key === activeKey;
-                const barco = barcos.find(b => b.id === esc.barco_id);
-                const d = calcDesglose(esc);
+            <tbody>
+              {FILAS_INPUT.map((fila, fi) => {
+                // Fila de sección — span completo
+                if (fila.sec) {
+                  return (
+                    <tr key={fi}>
+                      <td colSpan={1 + escenarios.length}
+                        style={{
+                          padding:"0 12px",height:32,
+                          background:"#EEF2F7",
+                          borderTop:"2px solid var(--border)",
+                          borderBottom:"1px solid var(--border)",
+                          fontSize:8,fontWeight:800,color:"var(--blue)",
+                          textTransform:"uppercase",letterSpacing:1.5,
+                          whiteSpace:"nowrap",
+                        }}>
+                        {fila.sec}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Fila de dato
                 return (
-                  <div key={key} style={{
-                    width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,
-                    borderLeft:"1px solid var(--border)",overflow:"hidden",
-                    outline: isActive ? "2px solid var(--blue)" : "none",
-                    outlineOffset:-1,
-                  }}>
-                    {/* Header */}
-                    <div style={{
-                      height:52,display:"flex",alignItems:"center",justifyContent:"space-between",
-                      padding:"0 10px",cursor:"pointer",boxSizing:"border-box",width:COL_W,
-                      background: isActive ? "var(--navy)" : "var(--mid)",
-                    }} onClick={() => setActiveKey(key)}>
-                      <div style={{overflow:"hidden",flex:1}}>
-                        <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,.6)",
-                          fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.5}}>
-                          🚢 {barco?.nombre||"—"}
-                        </div>
-                        <div style={{fontSize:10,fontWeight:700,color:"#fff",whiteSpace:"nowrap",
-                          overflow:"hidden",textOverflow:"ellipsis",marginTop:1}}>
-                          {icono} {nombreEscenario(esc, puertos)}
-                        </div>
-                      </div>
-                      <div style={{fontSize:8,color:"rgba(255,255,255,.5)",fontFamily:"var(--mono)",
-                        flexShrink:0,marginLeft:4,textAlign:"right"}}>
-                        {esc.operaciones_anio||0}<br/>op/año
-                      </div>
-                    </div>
+                  <tr key={fi} style={{background:"transparent"}}
+                    onMouseEnter={e => e.currentTarget.style.background="#F9FAFB"}
+                    onMouseLeave={e => e.currentTarget.style.background="transparent"}>
 
-                    {/* Filas */}
-                    {FILAS_INPUT.map((fila, fi) => {
-                      const cellBg = fila.result && d
-                        ? (fila.calc(d, esc).startsWith("-") ? "var(--red-bg)" : "var(--green-bg)")
-                        : "transparent";
-                      return fila.sec
-                        ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,
-                            background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
-                        : <div key={fi} style={{
-                            height:38,display:"flex",alignItems:"center",
-                            padding:"0 6px",borderBottom:"1px solid #F3F6FA",
-                            width:COL_W,boxSizing:"border-box",overflow:"hidden",
-                            background: cellBg,
-                          }}>
-                            {fila.render
-                              ? fila.render(esc, key)
-                              : fila.renderCalc
-                              ? (fila.renderCalc(esc, key, d) || <span style={{fontSize:10,color:"var(--light)"}}>—</span>)
-                              : fila.calc
-                              ? <input className="field-formula" readOnly
-                                  value={fila.calc(d, esc)}
-                                  style={{
-                                    fontWeight: fila.bold ? 800 : 400,
-                                    color: fila.red ? "var(--red)" : fila.result && d
-                                      ? (fila.calc(d, esc).startsWith("-") ? "var(--red)" : "var(--green)")
-                                      : "var(--navy)",
-                                  }} />
-                              : null
-                            }
-                          </div>;
+                    {/* Label */}
+                    <td style={{
+                      padding:"0 10px",height:38,
+                      borderBottom:"1px solid #F0F4F8",
+                      borderRight:"1px solid var(--border)",
+                      fontSize:10,fontWeight: fila.bold?700:600,
+                      color: fila.bold ? "var(--navy)" : "var(--muted)",
+                      whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                      verticalAlign:"middle",
+                    }}>
+                      {fila.label}
+                    </td>
+
+                    {/* Celda por escenario */}
+                    {escenarios.map(esc => {
+                      const key = matrixKey(esc);
+                      const isActive = key === activeKey;
+                      const d = calcDesglose(esc);
+                      const cellVal = fila.calc ? fila.calc(d, esc) : null;
+                      const isNeg = cellVal && cellVal.startsWith("-");
+                      const cellBg = fila.result
+                        ? (isNeg ? "var(--red-bg)" : "var(--green-bg)")
+                        : isActive ? "rgba(33,51,99,.03)" : "transparent";
+
+                      return (
+                        <td key={key} style={{
+                          padding:"0 6px",height:38,
+                          borderBottom:"1px solid #F0F4F8",
+                          borderLeft: isActive ? "2px solid var(--blue)" : "1px solid var(--border)",
+                          borderRight: isActive ? "2px solid var(--blue)" : "none",
+                          background: cellBg,
+                          verticalAlign:"middle",
+                        }}>
+                          {fila.render
+                            ? fila.render(esc, key)
+                            : fila.renderCalc
+                            ? (fila.renderCalc(esc, key, d) || <span style={{fontSize:10,color:"var(--light)"}}>—</span>)
+                            : fila.calc
+                            ? <input className="field-formula" readOnly
+                                value={cellVal}
+                                style={{
+                                  width:"100%",
+                                  fontWeight: fila.bold ? 800 : 400,
+                                  color: fila.red ? "var(--red)"
+                                    : fila.result
+                                    ? (isNeg ? "var(--red)" : "var(--green)")
+                                    : "var(--navy)",
+                                  background:"transparent",
+                                  border:"none",
+                                  padding:"0 2px",
+                                  fontFamily:"var(--mono)",
+                                  fontSize:11,
+                                }} />
+                            : null
+                          }
+                        </td>
+                      );
                     })}
+                  </tr>
+                );
+              })}
 
-                    {/* Footer */}
-                    <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
-                      <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
+              {/* Footer row — botones guardar */}
+              <tr>
+                <td style={{padding:"8px 10px",borderTop:"2px solid var(--border)",background:"var(--bg)"}} />
+                {escenarios.map(esc => {
+                  const key = matrixKey(esc);
+                  const isActive = key === activeKey;
+                  return (
+                    <td key={key} style={{
+                      padding:"8px 6px",borderTop:"2px solid var(--border)",
+                      background:"var(--bg)",
+                      borderLeft: isActive ? "2px solid var(--blue)" : "1px solid var(--border)",
+                    }}>
+                      <button className="btn btn-primary"
+                        style={{width:"100%",fontSize:10,padding:"6px 0"}}
                         onClick={() => guardar(key)} disabled={saving}>
                         {saving?"...":"Guardar"}
                       </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </>
+                    </td>
+                  );
+                })}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
