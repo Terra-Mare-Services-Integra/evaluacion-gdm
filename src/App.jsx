@@ -2608,49 +2608,71 @@ function TabServicio({ tipoServicio, titulo, icono }) {
               {escenarios.map((_,i) => <col key={i} style={{width:COL_W}} />)}
             </colgroup>
 
-            {/* Header row */}
+            {/* 2-row header */}
             <thead>
+              {/* Fila 1: agrupador por barco con colSpan */}
+              {(() => {
+                // Calcular grupos de columnas consecutivas por barco
+                const grupos = [];
+                for (const esc of escenarios) {
+                  const bid = esc.barco_id;
+                  if (grupos.length > 0 && grupos[grupos.length-1].barco_id === bid) {
+                    grupos[grupos.length-1].count++;
+                  } else {
+                    const barco = barcos.find(b => b.id === bid);
+                    grupos.push({ barco_id: bid, nombre: barco?.nombre||"—", count: 1 });
+                  }
+                }
+                return (
+                  <tr>
+                    <th style={{background:"#1A2744",border:"1px solid var(--border)",
+                      padding:"0 10px",height:32,verticalAlign:"middle"}} />
+                    {grupos.map((g, gi) => (
+                      <th key={gi} colSpan={g.count} style={{
+                        height:32,padding:"0 14px",
+                        background:"#1A2744",
+                        border:"1px solid rgba(255,255,255,.08)",
+                        verticalAlign:"middle",textAlign:"center",
+                      }}>
+                        <span style={{fontSize:9,fontWeight:800,color:"rgba(255,255,255,.8)",
+                          fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:1.2,
+                          whiteSpace:"nowrap"}}>
+                          🚢 {g.nombre}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                );
+              })()}
+
+              {/* Fila 2: ruta + mercado, una celda por escenario */}
               <tr>
-                <th style={{background:"var(--bg)",border:"1px solid var(--border)",padding:"12px 10px",minHeight:72,verticalAlign:"top"}} />
-
-
-
-
+                <th style={{background:"var(--bg)",border:"1px solid var(--border)",
+                  padding:"10px 10px",verticalAlign:"top"}} />
                 {escenarios.map(esc => {
                   const key = matrixKey(esc);
                   const isActive = key === activeKey;
-                  const barco = barcos.find(b => b.id === esc.barco_id);
                   return (
                     <th key={key}
                       onClick={() => setActiveKey(key)}
                       style={{
-                        minHeight:72,padding:"12px 10px 10px",cursor:"pointer",
+                        padding:"10px 10px 8px",cursor:"pointer",
                         background: isActive ? "var(--navy)" : "var(--mid)",
                         border: isActive ? "2px solid var(--blue)" : "1px solid var(--border)",
                         verticalAlign:"top",textAlign:"left",
                       }}>
-                      {/* Barco */}
-                      <div style={{
-                        fontSize:8,fontWeight:700,color:"rgba(255,255,255,.65)",
-                        fontFamily:"var(--mono)",textTransform:"uppercase",letterSpacing:.8,
-                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
-                        marginBottom:6,paddingBottom:6,
-                        borderBottom:"1px solid rgba(255,255,255,.15)",
-                      }}>
-                        🚢 {barco?.nombre||"—"}
-                      </div>
                       {/* Ruta */}
                       <div style={{
                         fontSize:11,fontWeight:700,color:"#fff",
                         whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
-                        lineHeight:1.3,
+                        lineHeight:1.3,marginBottom:5,
                       }}>
                         {icono} {nombreEscenario(esc, puertos)}
                       </div>
                       {/* Mercado */}
                       <div style={{
                         fontSize:8,color:"rgba(255,255,255,.45)",fontFamily:"var(--mono)",
-                        marginTop:6,letterSpacing:.3,
+                        letterSpacing:.3,
                       }}>
                         {esc.operaciones_anio||0} op/año
                       </div>
