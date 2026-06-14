@@ -2268,14 +2268,23 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const pvlsfo = puerto.precio_vlsfo||1000;
     const plub   = puerto.precio_lubricante||2200;
     const cLas   = filaVel?.consumo_lastre||0;
+    const cCar   = filaVel?.consumo_carga ||0;
     const cPto   = barco.consumo_puerto||0;
     const lubPct = (filaVel?.lubricante_pct||3)/100;
     const lubPtoPct = (barco.lubricante_pct_puerto||3)/100;
 
+    // Dirección de carga por tipo de servicio:
+    // alije:       ida lastre, vuelta lastre
+    // agua/lub:    ida carga (lleva producto), vuelta lastre
+    // slop:        ida lastre, vuelta carga (trae slop del buque)
+    const tipo = tipoServicio;
+    const cIda = (tipo === "agua" || tipo === "lubricantes") ? cCar : cLas;
+    const cVta = (tipo === "slop") ? cCar : cLas;
+
     const combAlist  = diasAlist  * cPto  * pvlsfo; const lubAlist  = diasAlist  * cPto  * lubPtoPct * plub;
-    const combIda    = diasNavIda * cLas  * pvlsfo; const lubIda    = diasNavIda * cLas  * lubPct    * plub;
+    const combIda    = diasNavIda * cIda  * pvlsfo; const lubIda    = diasNavIda * cIda  * lubPct    * plub;
     const combSitio  = diasSitio  * cPto  * pvlsfo; const lubSitio  = diasSitio  * cPto  * lubPtoPct * plub;
-    const combVta    = diasNavVta * cLas  * pvlsfo; const lubVta    = diasNavVta * cLas  * lubPct    * plub;
+    const combVta    = diasNavVta * cVta  * pvlsfo; const lubVta    = diasNavVta * cVta  * lubPct    * plub;
     const combDesarm = diasDesarm * cPto  * pvlsfo; const lubDesarm = diasDesarm * cPto  * lubPtoPct * plub;
     const totalComb  = combAlist+combIda+combSitio+combVta+combDesarm;
     const totalLub   = lubAlist +lubIda +lubSitio +lubVta +lubDesarm;
@@ -2313,10 +2322,12 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         const cL2 = fv.consumo_lastre||0;
         const cC2 = fv.consumo_carga||0;
         const lP2 = (fv.lubricante_pct||3)/100;
+        const cIda2 = (tipo === "agua" || tipo === "lubricantes") ? cC2 : cL2;
+        const cVta2 = (tipo === "slop") ? cC2 : cL2;
         const tComb2 = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * pvlsfo
-                     + (dNavIda2+dNavVta2) * cL2 * pvlsfo;
+                     + dNavIda2 * cIda2 * pvlsfo + dNavVta2 * cVta2 * pvlsfo;
         const tLub2  = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * lubPtoPct * plub
-                     + (dNavIda2+dNavVta2) * cL2 * lP2 * plub;
+                     + dNavIda2 * cIda2 * lP2 * plub + dNavVta2 * cVta2 * lP2 * plub;
         const tTrip2 = dEmb2 * costoDiaTripNav;
         const tCost2 = tComb2+tLub2+tTrip2+costoViveres+costoZarpe+costoArribo+costoOpVar;
         const rMD2    = ingresoMD - tCost2;
