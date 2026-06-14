@@ -2299,6 +2299,34 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const ingresoMD   = (esc.mob_demob_usd||0)+diasSitio*(esc.tarifa_dia_operando||0);
     const ingresoZarpe= diasTotalFrac*(esc.tarifa_dia_navegando||0);
 
+    // Velocidad óptima: recorre todas las velocidades disponibles y busca la que maximiza resultado
+    let velOptMD = velCrucero, velOptZarpe = velCrucero;
+    if (consumos.length > 0) {
+      let mejorMD = -Infinity, mejorZarpe = -Infinity;
+      for (const fv of consumos) {
+        const vel = fv.velocidad;
+        if (!vel) continue;
+        const dNavIda2  = (dist/vel)/24;
+        const dNavVta2  = dNavIda2;
+        const dTotal2   = (esc.hs_alistamiento||0)/24 + dNavIda2 + diasSitio + dNavVta2 + (esc.hs_desarmado||4)/24;
+        const dEmb2     = Math.ceil(dTotal2);
+        const cL2 = fv.consumo_lastre||0;
+        const cC2 = fv.consumo_carga||0;
+        const lP2 = (fv.lubricante_pct||3)/100;
+        const tComb2 = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * pvlsfo
+                     + (dNavIda2+dNavVta2) * cL2 * pvlsfo;
+        const tLub2  = ((esc.hs_alistamiento||0)/24 + diasSitio + (esc.hs_desarmado||4)/24) * cPto * lubPtoPct * plub
+                     + (dNavIda2+dNavVta2) * cL2 * lP2 * plub;
+        const tTrip2 = dEmb2 * costoDiaTripNav;
+        const tCost2 = tComb2+tLub2+tTrip2+costoViveres+costoZarpe+costoArribo+costoOpVar;
+        const rMD2    = ingresoMD - tCost2;
+        const ingZ2   = dTotal2 * (esc.tarifa_dia_navegando||0);
+        const rZ2     = ingZ2 - tCost2;
+        if (rMD2    > mejorMD)    { mejorMD    = rMD2;    velOptMD    = vel; }
+        if (rZ2     > mejorZarpe) { mejorZarpe = rZ2;     velOptZarpe = vel; }
+      }
+    }
+
     return {
       dist, velCrucero, pvlsfo, plub, dotacion,
       diasAlist, diasDesarm, diasNavIda, diasNavVta, diasSitio, diasTotalFrac, diasEmb,
@@ -2308,6 +2336,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
       costoEstibaOp, costoEstibaHs, costoEstibaDia, costoEstibaTn, costoBunker,
       totalCostos, ingresoMD, ingresoZarpe,
       resultMD: ingresoMD - totalCostos, resultZarpe: ingresoZarpe - totalCostos,
+      velOptMD, velOptZarpe,
       puerto,
     };
   };
@@ -2373,9 +2402,9 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     // Desglose operacional — filas calculadas por escenario
     { sec: "④ Tiempos y combustible" },
     { label: "Alistamiento",      calc: (d) => d ? `${fmtDec(d.diasAlist,2)}d · ${fmtCompact(d.combAlist+d.lubAlist)}` : "—" },
-    { label: "Navegación ida",    calc: (d) => d ? `${fmtDec(d.diasNavIda,2)}d · ${fmtCompact(d.combIda+d.lubIda)}`  : "—" },
+    { label: "Navegación ida",    calc: (d) => d ? `${fmtDec(d.diasNavIda,2)}d · ${fmtCompact(d.combIda+d.lubIda)} · 🏎 MD:${d.velOptMD}kn Z:${d.velOptZarpe}kn` : "—" },
     { label: "Operación sitio",   calc: (d) => d ? `${fmtDec(d.diasSitio,2)}d · ${fmtCompact(d.combSitio+d.lubSitio)}` : "—" },
-    { label: "Navegación vuelta", calc: (d) => d ? `${fmtDec(d.diasNavVta,2)}d · ${fmtCompact(d.combVta+d.lubVta)}`  : "—" },
+    { label: "Navegación vuelta", calc: (d) => d ? `${fmtDec(d.diasNavVta,2)}d · ${fmtCompact(d.combVta+d.lubVta)} · vel. ref. ${d.velCrucero}kn` : "—" },
     { label: "Desarmado",         calc: (d) => d ? `${fmtDec(d.diasDesarm,2)}d · ${fmtCompact(d.combDesarm+d.lubDesarm)}` : "—" },
     { label: "Días embarcados ↑", calc: (d) => d ? `${d.diasEmb} días` : "—", bold: true },
     { label: "Comb. + Lub. total",calc: (d) => d ? fmtCompact(d.totalComb+d.totalLub) : "—", red: true },
@@ -2457,17 +2486,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     { label: "Ingreso día zarpe *", calc: (d) => d ? fmtUSD(d.ingresoZarpe) : "—" },
     { label: "Resultado día zarpe", calc: (d) => d ? fmtCompact(d.resultZarpe) : "—", bold: true, result: true },
   ];
-
-  const activeEsc      = escenarios.find(e => matrixKey(e) === activeKey);
-  const activeBarco    = activeEsc ? barcos.find(b => b.id === activeEsc.barco_id) : null;
-  const activePuerto   = activeEsc ? puertos.find(p => p.id === activeEsc.puerto_id) : null;
-  const activeConsumos    = activeBarco ? (consumosPorBarco[activeBarco.id]||[]) : [];
-  const activeTripulacion = activeBarco ? (tripulacionPorBarco[activeBarco.id]||[]) : [];
-  const resultadosPorVel  = (activeBarco && activePuerto)
-    ? activeConsumos.map(c =>
-        calcularViaje(activeEsc, activeBarco, activePuerto, activeConsumos, activeTripulacion, c.velocidad)
-      ).filter(Boolean)
-    : [];
 
   const COL_W = 220;
 
@@ -2666,351 +2684,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
               })}
             </div>
           </div>
-          {activeEsc && activeBarco && activePuerto && (() => {
-            const esc = activeEsc;
-            const barco = activeBarco;
-            const puerto = activePuerto;
-
-            // Dotación navegando (suma automática del barco)
-            const dotacion = activeTripulacion.reduce((s, r) => s + (r.cantidad_navegando||0), 0);
-            const costoDiaTripNavegando = activeTripulacion.reduce((s,r) => s + (r.cantidad_navegando||0)*(r.costo_dia_navegando||0), 0);
-            const costoDiaTripPuerto    = activeTripulacion.reduce((s,r) => s + (r.cantidad_puerto||0)*(r.costo_dia_puerto||0), 0);
-
-            // Velocidad crucero del barco
-            const velCrucero = barco.velocidad_crucero || 8;
-
-            // Distancia según zona
-            const dist = esc.zona === "zona_comun" ? (puerto.dist_zona_comun||0)
-                       : esc.zona === "zona_alfa"  ? (puerto.dist_zona_alfa||0)
-                       : (puerto.dist_zona_delta||0);
-
-            // Tiempos por tramo (en días fracción)
-            const diasAlist   = (esc.hs_alistamiento||0) / 24;
-            const diasDesarm  = (esc.hs_desarmado||4)    / 24;
-            const diasNavIda  = velCrucero > 0 ? (dist / velCrucero) / 24 : 0;
-            const diasNavVta  = diasNavIda;
-            const diasSitio   = esc.dias_operacion || 0;
-            const diasTotalFrac = diasAlist + diasNavIda + diasSitio + diasNavVta + diasDesarm;
-            const diasEmbarcados = Math.ceil(diasTotalFrac);
-
-            // Consumos (usa velocidad crucero del barco)
-            const filaVel = activeConsumos.length > 0
-              ? activeConsumos.reduce((prev, curr) =>
-                  Math.abs(curr.velocidad - velCrucero) < Math.abs(prev.velocidad - velCrucero) ? curr : prev)
-              : null;
-            const pvlsfo = puerto.precio_vlsfo || 1000;
-            const plub   = puerto.precio_lubricante || 2200;
-            const consLastre  = filaVel?.consumo_lastre || 0;
-            const consCarga   = filaVel?.consumo_carga  || 0;
-            const consPuerto  = barco.consumo_puerto || 0;
-            const lubPct      = (filaVel?.lubricante_pct || 3) / 100;
-            const lubPuertoPct= (barco.lubricante_pct_puerto || 3) / 100;
-
-            const combAlist  = diasAlist  * consPuerto * pvlsfo;
-            const lubAlist   = diasAlist  * consPuerto * lubPuertoPct * plub;
-            const combIda    = diasNavIda * consLastre  * pvlsfo;
-            const lubIda     = diasNavIda * consLastre  * lubPct * plub;
-            const combSitio  = diasSitio  * consPuerto * pvlsfo;
-            const lubSitio   = diasSitio  * consPuerto * lubPuertoPct * plub;
-            const combVta    = diasNavVta * consLastre  * pvlsfo;
-            const lubVta     = diasNavVta * consLastre  * lubPct * plub;
-            const combDesarm = diasDesarm * consPuerto * pvlsfo;
-            const lubDesarm  = diasDesarm * consPuerto * lubPuertoPct * plub;
-
-            const totalComb = combAlist + combIda + combSitio + combVta + combDesarm;
-            const totalLub  = lubAlist  + lubIda  + lubSitio  + lubVta  + lubDesarm;
-
-            // Tripulación (días enteros × costo/día)
-            const costoTripNaveg  = (Math.ceil(diasNavIda) + Math.ceil(diasNavVta)) * costoDiaTripNavegando;
-            const costoTripPuerto = (Math.ceil(diasAlist) + Math.ceil(diasSitio) + Math.ceil(diasDesarm)) * costoDiaTripPuerto;
-            const costoTripTotal  = diasEmbarcados * costoDiaTripNavegando; // simplificado: días totales × costo navegando
-
-            // Víveres
-            const viveresActivo = esc.viveres_activo;
-            const viveresDiaPers = puerto.viveres_dia_persona || 0;
-            const costoViveres = viveresActivo ? diasEmbarcados * dotacion * viveresDiaPers : 0;
-
-            // Despacho (del escenario, pre-populado desde el puerto)
-            const costoZarpe  = esc.costo_despacho_zarpe  ?? puerto.costo_despacho_zarpe  ?? 0;
-            const costoArribo = esc.costo_despacho_arribo ?? puerto.costo_despacho_arribo ?? 0;
-
-            // Costos operativos variables
-            const costoEstibaOp  = esc.estiba_op_activo  ? (puerto.costo_estiba       || 0) : 0;
-            const costoEstibaHs  = esc.estiba_hs_activo  ? (puerto.costo_estiba_hora  || 0) * (esc.estiba_hs_cantidad||0) : 0;
-            const costoEstibaDia = esc.estiba_dia_activo  ? (puerto.costo_estiba_dia   || 0) * Math.ceil(diasSitio) : 0;
-            const costoEstibaTn  = esc.estiba_tn_activo  ? (puerto.costo_estiba_tn    || 0) * (esc.estiba_tn_cantidad||0) : 0;
-            const costoBunker    = esc.bunker_activo      ? (puerto.costo_bunker_operacion || 0) : 0;
-            const costoOpVar = costoEstibaOp + costoEstibaHs + costoEstibaDia + costoEstibaTn + costoBunker;
-
-            const totalCostos = totalComb + totalLub + costoTripTotal + costoViveres + costoZarpe + costoArribo + costoOpVar;
-
-            // Ingresos
-            const ingresoMobDemob = (esc.mob_demob_usd||0) + diasSitio*(esc.tarifa_dia_operando||0);
-            const ingresoZarpe    = diasTotalFrac * (esc.tarifa_dia_navegando||0);
-
-            const resultMobDemob = ingresoMobDemob - totalCostos;
-            const resultZarpe    = ingresoZarpe    - totalCostos;
-
-            const COL_LABEL = { width:180, fontWeight:600, color:"var(--muted)", fontSize:10, padding:"6px 10px" };
-            const COL_VAL   = { fontFamily:"var(--mono)", fontSize:11, padding:"6px 10px", textAlign:"right" };
-            const COL_RED   = { ...COL_VAL, color:"var(--red)" };
-            const COL_GRN   = { ...COL_VAL, color:"var(--green)", fontWeight:800 };
-            const rowBg = (i) => i%2===0 ? "#fff" : "#F9FAFB";
-
-            const tramo = (label, dias, comb, lub, trip, bg) => (
-              <tr style={{background:bg}}>
-                <td style={COL_LABEL}>{label}</td>
-                <td style={{...COL_VAL,color:"var(--navy)",fontWeight:700}}>{dias > 0 ? `${fmtDec(dias,2)} d` : "—"}</td>
-                <td style={COL_RED}>{comb > 0 ? fmtCompact(comb) : "—"}</td>
-                <td style={COL_RED}>{lub  > 0 ? fmtCompact(lub)  : "—"}</td>
-                <td style={COL_RED}>{trip > 0 ? fmtCompact(trip) : "—"}</td>
-                <td style={COL_RED}>{fmtCompact(comb+lub+trip)}</td>
-              </tr>
-            );
-
-            return (
-              <div className="card" style={{marginBottom:12}}>
-                <div className="sec">
-                  Desglose operacional —&nbsp;
-                  <span style={{color:"var(--navy)",fontWeight:800,textTransform:"none",letterSpacing:0}}>
-                    🚢 {barco.nombre} · {nombreEscenario(esc, puertos)}
-                  </span>
-                </div>
-
-                {/* Tramos de tiempo y combustible */}
-                <div style={{overflowX:"auto",marginBottom:12}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                    <thead>
-                      <tr style={{background:"var(--navy)"}}>
-                        <th style={{...COL_LABEL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Tramo</th>
-                        <th style={{...COL_VAL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Días</th>
-                        <th style={{...COL_VAL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Combustible</th>
-                        <th style={{...COL_VAL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Lubricante</th>
-                        <th style={{...COL_VAL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Tripulación</th>
-                        <th style={{...COL_VAL,color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:.5}}>Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tramo("① Alistamiento",    diasAlist,  combAlist,  lubAlist,  Math.ceil(diasAlist)*costoDiaTripPuerto, rowBg(0))}
-                      {tramo("② Navegación ida",  diasNavIda, combIda,    lubIda,    Math.ceil(diasNavIda)*costoDiaTripNavegando, rowBg(1))}
-                      {tramo("③ Operación sitio", diasSitio,  combSitio,  lubSitio,  Math.ceil(diasSitio)*costoDiaTripPuerto, rowBg(2))}
-                      {tramo("④ Navegación vuelta",diasNavVta, combVta,    lubVta,    Math.ceil(diasNavVta)*costoDiaTripNavegando, rowBg(3))}
-                      {tramo("⑤ Desarmado",       diasDesarm, combDesarm, lubDesarm, Math.ceil(diasDesarm)*costoDiaTripPuerto, rowBg(4))}
-                      <tr style={{background:"var(--bg)",borderTop:"2px solid var(--border)"}}>
-                        <td style={{...COL_LABEL,fontWeight:800,color:"var(--navy)"}}>TOTAL embarcados</td>
-                        <td style={{...COL_VAL,fontWeight:800,color:"var(--navy)"}}>{diasEmbarcados} d ↑</td>
-                        <td style={COL_RED}>{fmtCompact(totalComb)}</td>
-                        <td style={COL_RED}>{fmtCompact(totalLub)}</td>
-                        <td style={COL_RED}>{fmtCompact(costoTripTotal)}</td>
-                        <td style={{...COL_RED,fontWeight:800}}>{fmtCompact(totalComb+totalLub+costoTripTotal)}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Costos portuarios y operativos */}
-                <div className="g2" style={{marginBottom:12}}>
-                  <div>
-                    <div style={{fontSize:8,fontWeight:700,color:"var(--blue)",textTransform:"uppercase",
-                      letterSpacing:1.5,marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>
-                      Costos portuarios
-                    </div>
-                    {[
-                      ["Despacho zarpe",  costoZarpe,  "costo_despacho_zarpe"],
-                      ["Despacho arribo", costoArribo, "costo_despacho_arribo"],
-                    ].map(([label, val, field]) => (
-                      <div key={field} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                        padding:"5px 0",borderBottom:"1px solid #F3F6FA"}}>
-                        <span style={{fontSize:10,color:"var(--muted)",fontWeight:600}}>{label}</span>
-                        <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          <input className="field-input" type="number" min="0"
-                            value={esc[field]??0}
-                            onChange={ev => setField(activeKey, field, parseNum(ev.target.value))}
-                            style={{width:100,textAlign:"right"}} />
-                        </div>
-                      </div>
-                    ))}
-
-                    {/* Víveres */}
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                      padding:"5px 0",borderBottom:"1px solid #F3F6FA"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <div onClick={() => setField(activeKey,"viveres_activo",!esc.viveres_activo)}
-                          style={{width:18,height:18,borderRadius:4,cursor:"pointer",flexShrink:0,
-                            display:"flex",alignItems:"center",justifyContent:"center",
-                            background: esc.viveres_activo?"var(--navy)":"var(--bg)",
-                            border:`2px solid ${esc.viveres_activo?"var(--navy)":"var(--border)"}`}}>
-                          {esc.viveres_activo && <span style={{color:"#fff",fontSize:10,fontWeight:800}}>✓</span>}
-                        </div>
-                        <span style={{fontSize:10,color:"var(--muted)",fontWeight:600}}>
-                          Víveres ({dotacion} pers × {diasEmbarcados}d × {fmtUSD(viveresDiaPers)}/día)
-                        </span>
-                      </div>
-                      <span style={{fontFamily:"var(--mono)",fontSize:11,color: esc.viveres_activo?"var(--red)":"var(--light)"}}>
-                        {esc.viveres_activo ? fmtCompact(costoViveres) : "—"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{fontSize:8,fontWeight:700,color:"var(--blue)",textTransform:"uppercase",
-                      letterSpacing:1.5,marginBottom:8,paddingBottom:4,borderBottom:"1px solid var(--border)"}}>
-                      Costos operativos variables
-                    </div>
-                    {[
-                      { key:"estiba_op_activo",  label:`Estiba / op.`,                val: costoEstibaOp,  ref:`$${puerto.costo_estiba||0}/op` },
-                      { key:"estiba_hs_activo",  label:`Estiba / hora`,               val: costoEstibaHs,  ref:`$${puerto.costo_estiba_hora||0}/hs`, cantKey:"estiba_hs_cantidad", cantLabel:"hs" },
-                      { key:"estiba_dia_activo", label:`Estiba / día (${Math.ceil(diasSitio)}d)`, val: costoEstibaDia, ref:`$${puerto.costo_estiba_dia||0}/día` },
-                      { key:"estiba_tn_activo",  label:`Estiba / Tn`,                 val: costoEstibaTn,  ref:`$${puerto.costo_estiba_tn||0}/Tn`, cantKey:"estiba_tn_cantidad", cantLabel:"Tn" },
-                      { key:"bunker_activo",     label:`Bunker`,                      val: costoBunker,    ref:`$${puerto.costo_bunker_operacion||0}/op` },
-                    ].map(item => (
-                      <div key={item.key} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                        padding:"5px 0",borderBottom:"1px solid #F3F6FA",gap:8}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,flex:1}}>
-                          <div onClick={() => setField(activeKey, item.key, !esc[item.key])}
-                            style={{width:18,height:18,borderRadius:4,cursor:"pointer",flexShrink:0,
-                              display:"flex",alignItems:"center",justifyContent:"center",
-                              background: esc[item.key]?"var(--navy)":"var(--bg)",
-                              border:`2px solid ${esc[item.key]?"var(--navy)":"var(--border)"}`}}>
-                            {esc[item.key] && <span style={{color:"#fff",fontSize:10,fontWeight:800}}>✓</span>}
-                          </div>
-                          <span style={{fontSize:10,color:"var(--muted)",fontWeight:600}}>{item.label}</span>
-                          <span style={{fontSize:9,color:"var(--light)",fontFamily:"var(--mono)"}}>{item.ref}</span>
-                        </div>
-                        {item.cantKey && esc[item.key] && (
-                          <input className="field-input" type="number" min="0"
-                            value={esc[item.cantKey]??0}
-                            onChange={ev => setField(activeKey, item.cantKey, parseNum(ev.target.value))}
-                            style={{width:70,textAlign:"right"}}
-                            placeholder={item.cantLabel} />
-                        )}
-                        <span style={{fontFamily:"var(--mono)",fontSize:11,minWidth:60,textAlign:"right",
-                          color: esc[item.key]?"var(--red)":"var(--light)"}}>
-                          {esc[item.key] ? fmtCompact(item.val) : "—"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Resumen final */}
-                <div style={{background:"var(--bg)",borderRadius:8,padding:"12px 14px",
-                  border:"1px solid var(--border)"}}>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-                    {[
-                      {label:"Combustible + Lub.", val: totalComb+totalLub, red:true},
-                      {label:"Tripulación",        val: costoTripTotal, red:true},
-                      {label:"Víveres",            val: costoViveres, red:true},
-                      {label:"Despacho",           val: costoZarpe+costoArribo, red:true},
-                      {label:"Costos op. var.",    val: costoOpVar, red:true},
-                      {label:"TOTAL COSTOS",       val: totalCostos, red:true, bold:true},
-                    ].map(k => (
-                      <div key={k.label} style={{flex:1,minWidth:100,background:"#fff",borderRadius:6,
-                        padding:"8px 10px",border:"1px solid var(--border)"}}>
-                        <div style={{fontFamily:"var(--mono)",fontSize:13,fontWeight:k.bold?800:600,
-                          color:k.red?"var(--red)":"var(--navy)"}}>{fmtCompact(k.val)}</div>
-                        <div style={{fontSize:8,color:"var(--muted)",textTransform:"uppercase",
-                          letterSpacing:.5,marginTop:2}}>{k.label}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {[
-                      {label:"Ingreso Mob/Demob + día op.", val: ingresoMobDemob, res: resultMobDemob},
-                      {label:"Ingreso día desde zarpe *",   val: ingresoZarpe,    res: resultZarpe},
-                    ].map(k => (
-                      <div key={k.label} style={{flex:1,minWidth:200,background: k.res>=0?"var(--green-bg)":"var(--red-bg)",
-                        borderRadius:8,padding:"10px 14px",
-                        border:`1px solid ${k.res>=0?"var(--green-border)":"var(--red-border)"}`}}>
-                        <div style={{fontSize:9,color:"var(--muted)",fontWeight:700,textTransform:"uppercase",
-                          letterSpacing:.5,marginBottom:4}}>{k.label}</div>
-                        <div style={{display:"flex",gap:16,alignItems:"baseline"}}>
-                          <div>
-                            <div style={{fontSize:8,color:"var(--muted)"}}>Ingreso / op.</div>
-                            <div style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,color:"var(--navy)"}}>{fmtUSD(k.val)}</div>
-                          </div>
-                          <div>
-                            <div style={{fontSize:8,color:"var(--muted)"}}>Resultado / op.</div>
-                            <div style={{fontFamily:"var(--mono)",fontSize:18,fontWeight:800,
-                              color: k.res>=0?"var(--green)":"var(--red)"}}>{fmtCompact(k.res)}</div>
-                          </div>
-                          <div>
-                            <div style={{fontSize:8,color:"var(--muted)"}}>Margen</div>
-                            <div style={{fontFamily:"var(--mono)",fontSize:14,fontWeight:700,
-                              color: k.res>=0?"var(--green)":"var(--red)"}}>
-                              {k.val>0?`${((k.res/k.val)*100).toFixed(1)}%`:"—"}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
-                    * Día desde zarpe: ingreso estimado sin días de navegación exactos — usar tabla de velocidad para el valor preciso ·
-                    Vel. crucero: {barco.velocidad_crucero||8} kn · Dist: {dist} nm · VLSFO {fmtUSD(pvlsfo)}/Tn · Lub {fmtUSD(plub)}/drum
-                  </p>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Tabla de sensibilidad — solo para servicios donde la velocidad impacta el margen */}
-          {!isAlije && (
-          <div className="card">
-            <div className="sec">
-              Sensibilidad por velocidad —&nbsp;
-              <span style={{color:"var(--navy)",fontWeight:800,textTransform:"none",letterSpacing:0}}>
-                {activeEsc ? `🚢 ${activeBarco?.nombre||"—"} · ${nombreEscenario(activeEsc,puertos)}` : ""}
-              </span>
-            </div>
-            {(!activeBarco||!activePuerto) ? (
-              <div className="empty-state" style={{padding:20}}>
-                Hacé click en una columna para ver su análisis de velocidad.
-              </div>
-            ) : resultadosPorVel.length === 0 ? (
-              <div className="empty-state" style={{padding:20}}>Sin datos de consumo para este barco.</div>
-            ) : (
-              <>
-                <div style={{overflowX:"auto"}}>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Vel.</th><th>Dist.</th><th>Hs. nav.</th>
-                        <th>Días ↑</th><th>Combustible</th><th>Lubricante</th>
-                        <th>Tripulación</th><th>Puerto</th><th>Total costos</th>
-                        <th>Ingreso</th><th>Resultado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {resultadosPorVel.map((r, i) => {
-                        const mejor = r.resultado === Math.max(...resultadosPorVel.map(x=>x.resultado));
-                        return (
-                          <tr key={i} style={{background:mejor?"var(--green-bg)":"transparent"}}>
-                            <td style={{fontWeight:700,textAlign:"center"}}>{r.velocidad}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.dist}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)"}}>{r.hsNavIda.toFixed(1)}</td>
-                            <td style={{textAlign:"center",fontWeight:700,color:"var(--navy)",fontFamily:"var(--mono)"}}>{r.totalDiasEmbarcados}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalCombustible)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.totalLubricante)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoTrip)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--red)"}}>{fmtCompact(r.costoPuerto)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color:"var(--red)"}}>{fmtCompact(r.totalCostos)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{fmtCompact(r.ingreso)}</td>
-                            <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,
-                              color:r.resultado>=0?"var(--green)":"var(--red)"}}>{fmtCompact(r.resultado)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
-                  * Verde = velocidad óptima · VLSFO {fmtUSD(activePuerto.precio_vlsfo||1000)}/Tn · Lub {fmtUSD(activePuerto.precio_lubricante||2200)}/drum
-                </p>
-              </>
-            )}
-          </div>
-          )} {/* fin !isAlije */}
         </>
       )}
     </div>
