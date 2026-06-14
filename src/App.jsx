@@ -2291,11 +2291,12 @@ function TabServicio({ tipoServicio, titulo, icono }) {
 
     const costoTrip = diasEmb * costoDiaTripNav;
 
-    const viveresDiaPers = puerto.viveres_dia_persona||0;
-    const costoViveres   = diasEmb * dotacion * viveresDiaPers; // siempre activo
+    const viveresDiaPers = puerto.viveres_dia_persona || 0;
+    const costoViveres   = diasEmb * dotacion * viveresDiaPers;
 
-    const costoZarpe  = esc.costo_despacho_zarpe  ?? puerto.costo_despacho_zarpe  ?? 0;
-    const costoArribo = esc.costo_despacho_arribo ?? puerto.costo_despacho_arribo ?? 0;
+    // Despacho siempre del puerto (valores automáticos, no del escenario)
+    const costoZarpe  = puerto.costo_despacho_zarpe  || 0;
+    const costoArribo = puerto.costo_despacho_arribo || 0;
 
     const costoEstibaOp  = esc.estiba_op_activo  ? (puerto.costo_estiba||0)                            : 0;
     const costoEstibaHs  = esc.estiba_hs_activo  ? (puerto.costo_estiba_hora||0)*(esc.estiba_hs_cantidad||0) : 0;
