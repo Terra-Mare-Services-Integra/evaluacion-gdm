@@ -2462,10 +2462,14 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     ) : null },
     { label: "TOTAL COSTOS",    calc: (d) => d ? fmtCompact(d.totalCostos) : "—", bold: true, red: true },
     { sec: "⑦ Resultado" },
-    { label: "Ingreso Mob/Demob", calc: (d) => d ? fmtUSD(d.ingresoMD) : "—" },
-    { label: "Resultado Mob/Demob", calc: (d) => d ? fmtCompact(d.resultMD) : "—", bold: true, result: true },
-    { label: "Ingreso día zarpe *", calc: (d) => d ? fmtUSD(d.ingresoZarpe) : "—" },
-    { label: "Resultado día zarpe", calc: (d) => d ? fmtCompact(d.resultZarpe) : "—", bold: true, result: true },
+    { label: "Ingreso Mob/Demob / op.",   calc: (d) => d ? fmtUSD(d.ingresoMD)    : "—" },
+    { label: "Resultado Mob/Demob / op.", calc: (d) => d ? fmtCompact(d.resultMD) : "—", bold: true, result: true },
+    { label: "Ingreso anual Mob/Demob",   calc: (d, e) => d && e ? fmtCompact(d.ingresoMD    * (e.operaciones_anio||0)) : "—" },
+    { label: "Resultado anual Mob/Demob", calc: (d, e) => d && e ? fmtCompact(d.resultMD     * (e.operaciones_anio||0)) : "—", bold: true, result: true },
+    { label: "Ingreso día zarpe / op. *", calc: (d) => d ? fmtUSD(d.ingresoZarpe)    : "—" },
+    { label: "Resultado día zarpe / op.", calc: (d) => d ? fmtCompact(d.resultZarpe) : "—", bold: true, result: true },
+    { label: "Ingreso anual día zarpe",   calc: (d, e) => d && e ? fmtCompact(d.ingresoZarpe  * (e.operaciones_anio||0)) : "—" },
+    { label: "Resultado anual día zarpe", calc: (d, e) => d && e ? fmtCompact(d.resultZarpe   * (e.operaciones_anio||0)) : "—", bold: true, result: true },
   ];
 
   const COL_W = 220;
@@ -2624,7 +2628,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                     {/* Filas */}
                     {FILAS_INPUT.map((fila, fi) => {
                       const cellBg = fila.result && d
-                        ? (fila.calc(d).startsWith("-") ? "var(--red-bg)" : "var(--green-bg)")
+                        ? (fila.calc(d, esc).startsWith("-") ? "var(--red-bg)" : "var(--green-bg)")
                         : "transparent";
                       return fila.sec
                         ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,
@@ -2641,11 +2645,11 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                               ? (fila.renderCalc(esc, key, d) || <span style={{fontSize:10,color:"var(--light)"}}>—</span>)
                               : fila.calc
                               ? <input className="field-formula" readOnly
-                                  value={fila.calc(d)}
+                                  value={fila.calc(d, esc)}
                                   style={{
                                     fontWeight: fila.bold ? 800 : 400,
                                     color: fila.red ? "var(--red)" : fila.result && d
-                                      ? (fila.calc(d).startsWith("-") ? "var(--red)" : "var(--green)")
+                                      ? (fila.calc(d, esc).startsWith("-") ? "var(--red)" : "var(--green)")
                                       : "var(--navy)",
                                   }} />
                               : null
