@@ -1061,90 +1061,123 @@ function TabPuertos() {
     <div>
       {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
 
-      {/* Scroll container */}
       <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-        <div style={{display:"flex",width:"max-content"}}>
+        <table style={{borderCollapse:"collapse",tableLayout:"fixed",
+          width: 200 + COL_W * (puertos.length + (puertos.length < 5 ? 1 : 0))}}>
+          <colgroup>
+            <col style={{width:200}} />
+            {puertos.map(p => <col key={p.id} style={{width:COL_W}} />)}
+            {puertos.length < 5 && <col style={{width:COL_W}} />}
+          </colgroup>
 
-          {/* Columna de etiquetas — fija a la izquierda */}
-          <div style={{width:200,minWidth:200,flexShrink:0,paddingTop:48}}>
-            {FILAS.map((fila, fi) => (
-              fila.sec
-                ? <div key={fi} style={{
-                    height:34,display:"flex",alignItems:"center",
-                    padding:"0 10px",marginTop: fi===0?0:8,
-                    fontSize:8,fontWeight:700,color:"var(--blue)",
-                    textTransform:"uppercase",letterSpacing:1.5,
-                    borderBottom:"1px solid var(--border)",
-                    background:"var(--bg)",
-                  }}>{fila.sec}</div>
-                : <div key={fi} style={{
-                    height:38,display:"flex",alignItems:"center",
-                    padding:"0 10px",
+          {/* Header */}
+          <thead>
+            <tr>
+              <th style={{background:"var(--bg)",border:"1px solid var(--border)",
+                padding:"0 10px",height:48,verticalAlign:"middle"}} />
+              {puertos.map((p, pi) => (
+                <th key={p.id} style={{
+                  height:48,padding:"0 10px",
+                  background: p.activo ? "var(--navy)" : "var(--muted)",
+                  border:"1px solid var(--border)",
+                  verticalAlign:"middle",textAlign:"left",
+                }}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"#fff",
+                      overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                      🏗️ {p.nombre}
+                    </span>
+                    {puertos.length > 1 && (
+                      <button onClick={() => { if (window.confirm(`¿Eliminar "${p.nombre}"?`)) eliminar(pi); }}
+                        disabled={saving}
+                        style={{background:"rgba(255,255,255,.15)",border:"none",
+                          color:"rgba(255,255,255,.7)",fontSize:10,borderRadius:4,
+                          padding:"2px 6px",cursor:"pointer",flexShrink:0,marginLeft:4}}>
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </th>
+              ))}
+              {puertos.length < 5 && (
+                <th style={{background:"var(--bg)",border:"1px solid var(--border)",
+                  verticalAlign:"middle",textAlign:"center",padding:"0 10px"}}>
+                  <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}
+                    style={{margin:0}}>+ Nuevo puerto</button>
+                </th>
+              )}
+            </tr>
+          </thead>
+
+          <tbody>
+            {FILAS.map((fila, fi) => {
+              if (fila.sec) {
+                return (
+                  <tr key={fi}>
+                    <td colSpan={1 + puertos.length + (puertos.length < 5 ? 1 : 0)}
+                      style={{
+                        padding:"0 12px",height:32,
+                        background:"#EEF2F7",
+                        borderTop:"2px solid var(--border)",
+                        borderBottom:"1px solid var(--border)",
+                        fontSize:8,fontWeight:800,color:"var(--blue)",
+                        textTransform:"uppercase",letterSpacing:1.5,
+                        whiteSpace:"nowrap",
+                      }}>
+                      {fila.sec}
+                    </td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={fi}
+                  onMouseEnter={e => e.currentTarget.style.background="#F9FAFB"}
+                  onMouseLeave={e => e.currentTarget.style.background="transparent"}>
+                  <td style={{
+                    padding:"0 10px",height:38,
+                    borderBottom:"1px solid #F0F4F8",
+                    borderRight:"1px solid var(--border)",
                     fontSize:10,fontWeight:600,color:"var(--muted)",
-                    borderBottom:"1px solid #F3F6FA",
-                  }}>{fila.label}</div>
-            ))}
-          </div>
-
-          {/* Columnas de puertos */}
-          {puertos.map((p, pi) => (
-            <div key={p.id} style={{width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)",overflow:"hidden"}}>
-              {/* Header columna */}
-              <div style={{
-                height:48,display:"flex",alignItems:"center",justifyContent:"space-between",
-                padding:"0 10px",
-                background: p.activo ? "var(--navy)" : "var(--muted)",
-                borderRadius:"8px 8px 0 0",
-                width:COL_W,boxSizing:"border-box",
-              }}>
-                <span style={{fontSize:11,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
-                  🏗️ {p.nombre}
-                </span>
-                {puertos.length > 1 && (
-                  <button
-                    onClick={() => { if (window.confirm(`¿Eliminar "${p.nombre}"?`)) eliminar(pi); }}
-                    disabled={saving}
-                    style={{background:"rgba(255,255,255,.15)",border:"none",color:"rgba(255,255,255,.7)",
-                      fontSize:10,borderRadius:4,padding:"2px 6px",cursor:"pointer",flexShrink:0,marginLeft:4}}
-                  >✕</button>
-                )}
-              </div>
-
-              {/* Filas de datos */}
-              {FILAS.map((fila, fi) => (
-                fila.sec
-                  ? <div key={fi} style={{height:34,marginTop:fi===0?0:8,background:"var(--bg)",borderBottom:"1px solid var(--border)"}} />
-                  : <div key={fi} style={{
-                      height:38,display:"flex",alignItems:"center",
-                      padding:"0 6px",borderBottom:"1px solid #F3F6FA",
-                      width:COL_W,boxSizing:"border-box",overflow:"hidden",
+                    whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",
+                    verticalAlign:"middle",
+                  }}>
+                    {fila.label}
+                  </td>
+                  {puertos.map((p, pi) => (
+                    <td key={p.id} style={{
+                      padding:"0 6px",height:38,
+                      borderBottom:"1px solid #F0F4F8",
+                      borderLeft:"1px solid var(--border)",
+                      verticalAlign:"middle",
                     }}>
                       {fila.render(p, pi)}
-                    </div>
+                    </td>
+                  ))}
+                  {puertos.length < 5 && <td style={{borderLeft:"1px solid var(--border)"}} />}
+                </tr>
+              );
+            })}
+
+            {/* Footer guardar */}
+            <tr>
+              <td style={{padding:"8px 10px",borderTop:"2px solid var(--border)",background:"var(--bg)"}} />
+              {puertos.map((p, pi) => (
+                <td key={p.id} style={{padding:"8px 6px",
+                  borderTop:"2px solid var(--border)",borderLeft:"1px solid var(--border)",
+                  background:"var(--bg)"}}>
+                  <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
+                    onClick={() => guardar(pi)} disabled={saving}>
+                    {saving ? "..." : "Guardar"}
+                  </button>
+                </td>
               ))}
-
-              {/* Footer con botón guardar */}
-              <div style={{padding:"10px 6px 6px",borderTop:"1px solid var(--border)",marginTop:4}}>
-                <button className="btn btn-primary" style={{width:"100%",fontSize:10,padding:"6px 0"}}
-                  onClick={() => guardar(pi)} disabled={saving}>
-                  {saving ? "..." : "Guardar"}
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {/* Columna "Agregar" */}
-          {puertos.length < 5 && (
-            <div style={{width:COL_W,minWidth:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
-              <div style={{height:48,display:"flex",alignItems:"center",justifyContent:"center",
-                background:"var(--bg)",borderRadius:"8px 8px 0 0"}}>
-                <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}
-                  style={{margin:0}}>+ Nuevo puerto</button>
-              </div>
-            </div>
-          )}
-
-        </div>
+              {puertos.length < 5 && (
+                <td style={{borderTop:"2px solid var(--border)",borderLeft:"1px solid var(--border)",
+                  background:"var(--bg)"}} />
+              )}
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );
