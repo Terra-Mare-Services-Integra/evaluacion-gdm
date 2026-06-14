@@ -931,6 +931,7 @@ const PUERTO_DEFAULT = {
   costo_agua_m3: 0,
   costo_slop_m3: 0,
   costo_bunker_operacion: 0,
+  costo_despacho_operacion: 0,
   dist_zona_comun: 0,
   dist_zona_alfa: 0,
   dist_zona_delta: 0,
@@ -999,6 +1000,7 @@ function TabPuertos() {
         costo_agua_m3: puerto.costo_agua_m3,
         costo_slop_m3: puerto.costo_slop_m3,
         costo_bunker_operacion: puerto.costo_bunker_operacion,
+        costo_despacho_operacion: puerto.costo_despacho_operacion,
         dist_zona_comun: puerto.dist_zona_comun,
         dist_zona_alfa: puerto.dist_zona_alfa,
         dist_zona_delta: puerto.dist_zona_delta,
@@ -1107,6 +1109,9 @@ function TabPuertos() {
     )},
     { label: "Bunker / operación",            render: (p, i) => (
         <input className="field-input" type="number" value={p.costo_bunker_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_bunker_operacion:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Despacho / operación (USD)",    render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_despacho_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_despacho_operacion:parseNum(e.target.value)}:x)); }} />
     )},
     { sec: "⑤ Costos indirectos",            items: null },
     { label: "Lump sum mensual (USD)",       render: (p, i) => (
@@ -1627,7 +1632,7 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
       const costoCombNav = ops * diasNavTotal * ((costoCombNavLastre + costoCombNavCarga) / 2 + (costoLubNavLastre + costoLubNavCarga) / 2);
       const costoCombSitio = ops * diasSitio * (costoCombPuerto + costoLubPuerto);
       const costoTrip = ops * (diasNavTotal * tripNavegando + diasSitio * tripPuerto);
-      const costoPuertoOp = ops * ((puerto.costo_estiba || 0) + (puerto.costo_bunker_operacion || 0));
+      const costoPuertoOp = ops * ((puerto.costo_estiba || 0) + (puerto.costo_bunker_operacion || 0) + (puerto.costo_despacho_operacion || 0));
 
       // Costos específicos agua/slop
       let costoServicio = 0;
@@ -2363,7 +2368,8 @@ function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocida
 
   // Costos puerto por operación (amarre es fijo mensual, no se carga por viaje)
   const costoPuerto = (puerto.costo_estiba || 0)
-                    + (puerto.costo_bunker_operacion || 0);
+                    + (puerto.costo_bunker_operacion || 0)
+                    + (puerto.costo_despacho_operacion || 0);
 
   // Costos específicos servicio
   let costoServicio = 0;
