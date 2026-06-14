@@ -2050,9 +2050,9 @@ function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocida
       ingreso = totalDiasFraccion * (escenario.tarifa_dia_navegando || 0);
     }
   } else if (tipoServicio === "agua") {
-    ingreso = (escenario.m3_agua || 0) * (escenario.precio_unitario || 0);
+    ingreso = (escenario.m3_agua || 0) * (escenario.entregas_por_viaje || 1) * (escenario.precio_unitario || 0);
   } else if (tipoServicio === "slop") {
-    ingreso = (escenario.m3_slop || 0) * (escenario.precio_unitario || 0);
+    ingreso = (escenario.m3_slop || 0) * (escenario.entregas_por_viaje || 1) * (escenario.precio_unitario || 0);
   } else if (tipoServicio === "lubricantes") {
     ingreso = (escenario.drums_lubricante || 0) * (escenario.precio_unitario || 0);
   }
@@ -2183,6 +2183,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         m3_agua:              e.m3_agua,
         m3_slop:              e.m3_slop,
         drums_lubricante:     e.drums_lubricante,
+        entregas_por_viaje:   e.entregas_por_viaje,
         viveres_activo:       e.viveres_activo,
         costo_despacho_zarpe: e.costo_despacho_zarpe,
         costo_despacho_arribo: e.costo_despacho_arribo,
@@ -2245,6 +2246,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           modalidad_pago:   "mob_dia_operado",
           mob_demob_usd: 0, tarifa_dia_navegando: 0, tarifa_dia_operando: 0,
           precio_unitario: 0, m3_agua: 0, m3_slop: 0, drums_lubricante: 0,
+          entregas_por_viaje: 1,
           viveres_activo: false,
           costo_despacho_zarpe:  puerto?.costo_despacho_zarpe  || puerto?.costo_despacho_operacion || 0,
           costo_despacho_arribo: puerto?.costo_despacho_arribo || puerto?.costo_despacho_operacion || 0,
@@ -2339,8 +2341,19 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker;
 
     const totalCostos = totalComb+totalLub+costoTrip+costoViveres+costoZarpe+costoArribo+costoOpVar;
-    const ingresoMD   = (esc.mob_demob_usd||0)+diasSitio*(esc.tarifa_dia_operando||0);
-    const ingresoZarpe= diasTotalFrac*(esc.tarifa_dia_navegando||0);
+
+    // Ingreso según tipo de servicio
+    const entregas = esc.entregas_por_viaje || 1;
+    const ingresoProducto = tipoServicio === "agua"        ? (esc.m3_agua||0)          * entregas * (esc.precio_unitario||0)
+                          : tipoServicio === "slop"        ? (esc.m3_slop||0)          * entregas * (esc.precio_unitario||0)
+                          : tipoServicio === "lubricantes" ? (esc.drums_lubricante||0)             * (esc.precio_unitario||0)
+                          : 0;
+    const ingresoMD    = tipoServicio === "alije"
+      ? (esc.mob_demob_usd||0) + diasSitio*(esc.tarifa_dia_operando||0)
+      : ingresoProducto;
+    const ingresoZarpe = tipoServicio === "alije"
+      ? diasTotalFrac*(esc.tarifa_dia_navegando||0)
+      : ingresoProducto;
 
     return {
       dist, velCrucero, pvlsfo, plub, dotacion,
@@ -2392,11 +2405,16 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     ] : []),
     ...((isAgua||isSlop) ? [
       { sec: "② Tarifas" },
-      { label: isAgua?"m³ a entregar":"m³ slop a recoger", render: (e, key) => (
+      { label: isAgua?"m³ por entrega":"m³ slop por entrega", render: (e, key) => (
           <input className="field-input" type="number" min="0"
             value={isAgua?(e.m3_agua??0):(e.m3_slop??0)}
             onChange={ev => setField(key,isAgua?"m3_agua":"m3_slop",parseNum(ev.target.value))} />
       )},
+      { label: "Entregas por viaje", render: (e, key) => (
+          <input className="field-input" type="number" min="0" step="0.1" value={e.entregas_por_viaje??1}
+            onChange={ev => setField(key,"entregas_por_viaje",parseNum(ev.target.value))} />
+      )},
+      { label: "m³ total por viaje", calc: (d, e) => e ? fmtDec((isAgua?(e.m3_agua||0):(e.m3_slop||0))*(e.entregas_por_viaje||1),1)+"m³" : "—" },
       { label: "Precio (USD/m³)", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.precio_unitario??0}
             onChange={ev => setField(key,"precio_unitario",parseNum(ev.target.value))} />
