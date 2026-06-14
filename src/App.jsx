@@ -126,6 +126,9 @@ select.campo-input{cursor:pointer}
 .data-table tr.puerto-row td{background:var(--gold-bg);font-style:italic}
 .data-table .tbl-input{width:100%;border:1px solid var(--gold-border);border-radius:4px;padding:4px 6px;font-size:11px;background:var(--gold-bg);color:#78610E;font-family:var(--sans);text-align:center}
 .data-table .tbl-input:focus{outline:none;border-color:var(--gold)}
+.field-input{width:100%;border:1px solid var(--gold-border);border-radius:4px;padding:4px 6px;font-size:11px;background:var(--gold-bg);color:#78610E;font-family:var(--sans)}
+.field-input:focus{outline:none;border-color:var(--gold)}
+select.field-input{cursor:pointer}
 .data-table .tbl-formula{width:100%;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:10px;background:#F9FAFB;color:#374151;font-family:var(--mono);text-align:center}
 .data-table .tbl-stat{width:100%;border:1px solid var(--green-border);border-radius:4px;padding:4px 6px;font-size:10px;background:var(--green-bg);color:var(--green);font-family:var(--mono);text-align:center;font-weight:700}
 .tbl-pct-wrap{display:flex;align-items:center;gap:3px}
@@ -1051,68 +1054,68 @@ function TabPuertos() {
   const FILAS = [
     { sec: "① Identidad",                   items: null }, // header de sección
     { label: "Nombre",                       render: (p, i) => (
-        <input className="tbl-input" value={p.nombre || ""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nombre:e.target.value}:x)); }} />
+        <input className="field-input" value={p.nombre || ""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nombre:e.target.value}:x)); }} />
     )},
     { label: "Estado",                       render: (p, i) => (
-        <select className="tbl-input" value={p.activo?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,activo:e.target.value==="true"}:x)); }}>
+        <select className="field-input" value={p.activo?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,activo:e.target.value==="true"}:x)); }}>
           <option value="true">Activo</option>
           <option value="false">Inactivo</option>
         </select>
     )},
     { sec: "② Distancias (nm)",              items: null },
     { label: "Zona Común",                   render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.dist_zona_comun??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_comun:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.dist_zona_comun??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_comun:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Zona Alfa",                    render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.dist_zona_alfa??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_alfa:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.dist_zona_alfa??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_alfa:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Zona Delta",                   render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.dist_zona_delta??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_delta:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.dist_zona_delta??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,dist_zona_delta:parseNum(e.target.value)}:x)); }} />
     )},
     { sec: "③ Costos operativos (USD)",      items: null },
     { label: "Portuario / día",              render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_portuario_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_portuario_dia:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_portuario_dia??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_portuario_dia:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Estiba / operación",           render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_estiba??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_estiba??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_estiba:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Compra agua (USD/m³)",         render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_agua_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_agua_m3:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_agua_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_agua_m3:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Descarga slop (USD/m³)",       render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_slop_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_slop_m3:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_slop_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_slop_m3:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Bunker / operación",           render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_bunker_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_bunker_operacion:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_bunker_operacion??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_bunker_operacion:parseNum(e.target.value)}:x)); }} />
     )},
     { sec: "④ Costos indirectos",            items: null },
     { label: "Lump sum mensual (USD)",       render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.costo_indirecto_lumpsum??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_indirecto_lumpsum:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.costo_indirecto_lumpsum??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_indirecto_lumpsum:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Anual (× 12)",                render: (p) => (
         <input className="tbl-formula" readOnly value={fmtUSD((p.costo_indirecto_lumpsum||0)*12)} />
     )},
     { label: "Nota / descripción",           render: (p, i) => (
-        <input className="tbl-input" value={p.nota_indirectos||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nota_indirectos:e.target.value}:x)); }} placeholder="—" />
+        <input className="field-input" value={p.nota_indirectos||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nota_indirectos:e.target.value}:x)); }} placeholder="—" />
     )},
     { sec: "⑤ Condiciones operativas",       items: null },
     { label: "Calado máx. (m)",             render: (p, i) => (
-        <input className="tbl-input" type="number" step="0.1" value={p.calado_max_m??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,calado_max_m:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" step="0.1" value={p.calado_max_m??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,calado_max_m:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Horas operativas / día",       render: (p, i) => (
-        <input className="tbl-input" type="number" value={p.horas_operativas??24} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,horas_operativas:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" value={p.horas_operativas??24} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,horas_operativas:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Espera promedio (hs)",         render: (p, i) => (
-        <input className="tbl-input" type="number" step="0.5" value={p.espera_promedio_hs??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,espera_promedio_hs:parseNum(e.target.value)}:x)); }} />
+        <input className="field-input" type="number" step="0.5" value={p.espera_promedio_hs??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,espera_promedio_hs:parseNum(e.target.value)}:x)); }} />
     )},
     { label: "Grúa disponible",              render: (p, i) => (
-        <select className="tbl-input" value={p.tiene_grua?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,tiene_grua:e.target.value==="true"}:x)); }}>
+        <select className="field-input" value={p.tiene_grua?"true":"false"} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,tiene_grua:e.target.value==="true"}:x)); }}>
           <option value="false">No</option>
           <option value="true">Sí</option>
         </select>
     )},
     { label: "Restricción viento / clima",   render: (p, i) => (
-        <input className="tbl-input" value={p.restriccion_viento||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,restriccion_viento:e.target.value}:x)); }} placeholder="—" />
+        <input className="field-input" value={p.restriccion_viento||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,restriccion_viento:e.target.value}:x)); }} placeholder="—" />
     )},
   ];
 
@@ -1122,10 +1125,10 @@ function TabPuertos() {
 
       {/* Scroll container */}
       <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-        <div style={{minWidth: 200 + COL_W * puertos.length, display:"flex", gap:0}}>
+        <div style={{display:"flex",width:"max-content"}}>
 
-          {/* Columna de etiquetas — sticky left */}
-          <div style={{width:200,flexShrink:0,paddingTop:48}}>
+          {/* Columna de etiquetas — fija a la izquierda */}
+          <div style={{width:200,minWidth:200,flexShrink:0,paddingTop:48}}>
             {FILAS.map((fila, fi) => (
               fila.sec
                 ? <div key={fi} style={{
@@ -1147,15 +1150,16 @@ function TabPuertos() {
 
           {/* Columnas de puertos */}
           {puertos.map((p, pi) => (
-            <div key={p.id} style={{width:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
+            <div key={p.id} style={{width:COL_W,minWidth:COL_W,maxWidth:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)",overflow:"hidden"}}>
               {/* Header columna */}
               <div style={{
                 height:48,display:"flex",alignItems:"center",justifyContent:"space-between",
                 padding:"0 10px",
                 background: p.activo ? "var(--navy)" : "var(--muted)",
                 borderRadius:"8px 8px 0 0",
+                width:COL_W,boxSizing:"border-box",
               }}>
-                <span style={{fontSize:11,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                <span style={{fontSize:11,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
                   🏗️ {p.nombre}
                 </span>
                 {puertos.length > 1 && (
@@ -1175,6 +1179,7 @@ function TabPuertos() {
                   : <div key={fi} style={{
                       height:38,display:"flex",alignItems:"center",
                       padding:"0 6px",borderBottom:"1px solid #F3F6FA",
+                      width:COL_W,boxSizing:"border-box",overflow:"hidden",
                     }}>
                       {fila.render(p, pi)}
                     </div>
@@ -1192,7 +1197,7 @@ function TabPuertos() {
 
           {/* Columna "Agregar" */}
           {puertos.length < 5 && (
-            <div style={{width:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
+            <div style={{width:COL_W,minWidth:COL_W,flexShrink:0,borderLeft:"1px solid var(--border)"}}>
               <div style={{height:48,display:"flex",alignItems:"center",justifyContent:"center",
                 background:"var(--bg)",borderRadius:"8px 8px 0 0"}}>
                 <button className="sel-btn add" onClick={nuevoPuerto} disabled={saving}
