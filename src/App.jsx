@@ -12,8 +12,7 @@ const TABLE_ESCENARIOS_SERVICIO  = "gdm_escenarios_servicio";
 
 const TABS = [
   { id: "barcos",      label: "Barcos",           icon: "🚢" },
-  { id: "puertos",     label: "Puertos",          icon: "🏗️" },
-  { id: "variables",   label: "Variables",        icon: "⛽" },
+  { id: "puertos",     label: "Puerto & Costos",  icon: "🏗️" },
   { id: "alije",       label: "Alije",            icon: "⚓" },
   { id: "agua",        label: "Entrega de Agua",  icon: "💧" },
   { id: "slop",        label: "Transporte Slop",  icon: "🛢️" },
@@ -192,7 +191,7 @@ const calcOpexFijo = (b) =>
   (b.opex_retiro_slob || 0);
 
 // ─── BLOQUE CONSUMOS ───────────────────────────────────────────────────────
-function BloqueConsumos({ barcoId, precioVlsfo }) {
+function BloqueConsumos({ barcoId }) {
   const [consumos, setConsumos] = useState([]);
   const [consumoPuerto, setConsumoPuerto] = useState(0.89);
   const [lubPuertoPct, setLubPuertoPct]   = useState(3);
@@ -276,7 +275,7 @@ function BloqueConsumos({ barcoId, precioVlsfo }) {
 
   if (loading) return <div className="empty-state">Cargando consumos...</div>;
 
-  const pvlsfo = precioVlsfo || 1000;
+  const pvlsfo = null; // precio por puerto — ver tab Puerto & Costos
 
   return (
     <div className="card">
@@ -353,7 +352,7 @@ function BloqueConsumos({ barcoId, precioVlsfo }) {
         </table>
       </div>
 
-      <p className="nota">* Precio VLSFO tomado de Variables Globales ({fmtUSD(pvlsfo)}/Tn)</p>
+      <p className="nota">* El precio VLSFO se configura por puerto en la tab Puerto & Costos</p>
 
       <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
         <button className="btn btn-primary" onClick={guardar} disabled={saving}>
@@ -545,7 +544,7 @@ function BloqueTripulacion({ barcoId }) {
 }
 
 // ─── TAB BARCOS ────────────────────────────────────────────────────────────
-function TabBarcos({ precioVlsfo }) {
+function TabBarcos() {
   const [barcos, setBarcos]   = useState([]);
   const [selIdx, setSelIdx]   = useState(0);
   const [saving, setSaving]   = useState(false);
@@ -750,7 +749,7 @@ function TabBarcos({ precioVlsfo }) {
       </div>
 
       {/* BLOQUE 3 — CONSUMOS */}
-      <BloqueConsumos barcoId={barco.id} precioVlsfo={precioVlsfo} />
+      <BloqueConsumos barcoId={barco.id} />
 
       {/* BLOQUE 4 — CAPACIDADES */}
       <BloqueCapacidades barco={barco} set={set} />
@@ -827,95 +826,6 @@ function TabBarcos({ precioVlsfo }) {
   );
 }
 
-// ─── TAB VARIABLES GLOBALES ────────────────────────────────────────────────
-function TabVariables({ onPrecioChange, onCrecimientoChange, onLubricanteChange }) {
-  const [vars, setVars]       = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
-  const [msg, setMsg]         = useState(null);
-
-  const showMsg = useCallback((type, text) => {
-    setMsg({ type, text });
-    if (type === "ok") setTimeout(() => setMsg(null), 3000);
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("gdm_variables_globales").select("*").order("clave");
-        if (error) throw error;
-        setVars(data || []);
-        const vlsfo = data?.find(v => v.clave === "precio_vlsfo");
-        if (vlsfo && onPrecioChange) onPrecioChange(vlsfo.valor);
-        const crec = data?.find(v => v.clave === "crecimiento_operaciones_pct");
-        if (crec && onCrecimientoChange) onCrecimientoChange(crec.valor);
-        const lub = data?.find(v => v.clave === "precio_lubricante");
-        if (lub && onLubricanteChange) onLubricanteChange(lub.valor);
-      } catch (e) {
-        showMsg("err", `Error al cargar variables: ${e.message}`);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [showMsg, onPrecioChange, onCrecimientoChange, onLubricanteChange]);
-
-  const setVar = (id, val) => {
-    setVars(prev => prev.map(v => v.id === id ? { ...v, valor: parseNum(val) } : v));
-  };
-
-  const guardar = async () => {
-    setSaving(true);
-    try {
-      const resultados = await Promise.all(
-        vars.map(v =>
-          supabase.from("gdm_variables_globales")
-            .update({ valor: v.valor, updated_at: new Date().toISOString() })
-            .eq("id", v.id)
-        )
-      );
-      const primerError = resultados.find(r => r.error);
-      if (primerError) throw primerError.error;
-      const vlsfo = vars.find(v => v.clave === "precio_vlsfo");
-      if (vlsfo && onPrecioChange) onPrecioChange(vlsfo.valor);
-      const crec = vars.find(v => v.clave === "crecimiento_operaciones_pct");
-      if (crec && onCrecimientoChange) onCrecimientoChange(crec.valor);
-      const lub = vars.find(v => v.clave === "precio_lubricante");
-      if (lub && onLubricanteChange) onLubricanteChange(lub.valor);
-      showMsg("ok", "Variables guardadas.");
-    } catch (e) {
-      showMsg("err", `Error al guardar: ${e.message}`);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <div className="empty-state">Cargando variables...</div>;
-
-  return (
-    <div>
-      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
-      <div className="card">
-        <div className="sec">⛽ Variables globales — afectan todos los modelos</div>
-        <div className="g2">
-          {vars.map(v => (
-            <div className="campo" key={v.id}>
-              <div className="campo-label">{v.descripcion || v.clave}</div>
-              <input className="campo-input" type="number" value={v.valor}
-                onChange={e => setVar(v.id, e.target.value)} />
-            </div>
-          ))}
-        </div>
-        <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
-          <button className="btn btn-primary" onClick={guardar} disabled={saving}>
-            {saving ? "Guardando..." : "Guardar variables"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 const PUERTO_DEFAULT = {
@@ -931,6 +841,8 @@ const PUERTO_DEFAULT = {
   costo_slop_m3: 0,
   costo_bunker_operacion: 0,
   costo_despacho_operacion: 0,
+  precio_vlsfo: 1000,
+  precio_lubricante: 2200,
   dist_zona_comun: 0,
   dist_zona_alfa: 0,
   dist_zona_delta: 0,
@@ -1000,6 +912,8 @@ function TabPuertos() {
         costo_slop_m3: puerto.costo_slop_m3,
         costo_bunker_operacion: puerto.costo_bunker_operacion,
         costo_despacho_operacion: puerto.costo_despacho_operacion,
+        precio_vlsfo: puerto.precio_vlsfo,
+        precio_lubricante: puerto.precio_lubricante,
         dist_zona_comun: puerto.dist_zona_comun,
         dist_zona_alfa: puerto.dist_zona_alfa,
         dist_zona_delta: puerto.dist_zona_delta,
@@ -1122,6 +1036,13 @@ function TabPuertos() {
     { label: "Nota / descripción",           render: (p, i) => (
         <input className="field-input" value={p.nota_indirectos||""} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,nota_indirectos:e.target.value}:x)); }} placeholder="—" />
     )},
+    { sec: "⑥ Precios de referencia",        items: null },
+    { label: "VLSFO (USD/Tn)",               render: (p, i) => (
+        <input className="field-input" type="number" value={p.precio_vlsfo??1000} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,precio_vlsfo:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Lubricante (USD/drum)",        render: (p, i) => (
+        <input className="field-input" type="number" value={p.precio_lubricante??2200} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,precio_lubricante:parseNum(e.target.value)}:x)); }} />
+    )},
   ];
 
   return (
@@ -1232,7 +1153,7 @@ const ZONAS = [
 ];
 
 // ─── MOTOR DE CÁLCULO ─────────────────────────────────────────────────────
-function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, anios = 7, crecimientoPct = 0, precioLubricante = 2200) {
+function calcularPL(barco, puerto, servicios, consumos, tripulacion, anios = 7, crecimientoPct = 0) {
   if (!barco || !puerto) return null;
 
   const DIAS_ANIO = 365;
@@ -1251,8 +1172,8 @@ function calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo
   const consPuerto = barco.consumo_puerto || 0;
   const lubPct     = (filaVel?.lubricante_pct || 3) / 100;
   const lubPuertoPct = (barco.lubricante_pct_puerto || 3) / 100;
-  const pvlsfo     = precioVlsfo || 1000;
-  const plub       = precioLubricante || 2200;
+  const pvlsfo     = puerto.precio_vlsfo || 1000;
+  const plub       = puerto.precio_lubricante || 2200;
 
   // Costo diario combustible (VLSFO)
   const costoCombNavLastre = consLastre * pvlsfo;
@@ -1420,7 +1341,7 @@ function calcVAN(flujos, tasa) {
 }
 
 // ─── TAB P&L ───────────────────────────────────────────────────────────────
-function TabPL({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
+function TabPL({ crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
   const [consumos, setConsumos]   = useState([]);
@@ -1478,7 +1399,7 @@ function TabPL({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, 7, crecimientoPct, precioLubricante) : null;
+  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, 7, crecimientoPct) : null;
 
   return (
     <div>
@@ -1578,7 +1499,7 @@ function TabPL({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
 }
 
 // ─── TAB CASHFLOW ──────────────────────────────────────────────────────────
-function TabCashflow({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
+function TabCashflow({ crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
   const [consumos, setConsumos]   = useState([]);
@@ -1636,7 +1557,7 @@ function TabCashflow({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, 7, crecimientoPct, precioLubricante) : null;
+  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, 7, crecimientoPct) : null;
 
   // Saldo acumulado calculado fuera del render para evitar mutación en JSX
   const saldosAcum = pl ? pl.anios.reduce((acc, a) => {
@@ -1779,7 +1700,7 @@ const METRICAS = [
   { id: "margenEbitda1",  label: "Margen EBITDA",  fmt: v => `${(v * 100).toFixed(1)}%` },
 ];
 
-function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct = 0 }) {
+function TabComparacion({ crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
   const [servicios, setServicios] = useState([]);
@@ -1837,7 +1758,7 @@ function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct =
     for (const puerto of puertos) {
       const consumos   = consumosPorBarco[barco.id] || [];
       const tripulacion = tripulacionPorBarco[barco.id] || [];
-      const pl = calcularPL(barco, puerto, servicios, consumos, tripulacion, precioVlsfo, maxAnios, crecimientoPct, precioLubricante);
+      const pl = calcularPL(barco, puerto, servicios, consumos, tripulacion, maxAnios, crecimientoPct);
       if (!pl) continue;
       combinaciones.push({
         barco,
@@ -1988,7 +1909,7 @@ function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct =
               </table>
             </div>
             <p style={{fontSize:9,color:"var(--muted)",marginTop:8,fontStyle:"italic"}}>
-              * Crecimiento operaciones: {crecimientoPct}% anual · VLSFO: {fmtCompact(precioVlsfo)}/Tn · Evaluado a {maxAnios} {maxAnios === 1 ? "año" : "años"}
+              * Crecimiento operaciones: {crecimientoPct}% anual · Evaluado a {maxAnios} {maxAnios === 1 ? "año" : "años"} · VLSFO y lubricante según cada puerto
             </p>
           </div>
         </>
@@ -1999,11 +1920,11 @@ function TabComparacion({ precioVlsfo, precioLubricante = 2200, crecimientoPct =
 
 
 // ─── MOTOR DE VIAJE ────────────────────────────────────────────────────────
-function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocidad, precioVlsfo, precioLubricante) {
+function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocidad) {
   if (!escenario || !barco || !puerto || !velocidad) return null;
 
-  const pvlsfo = precioVlsfo || 1000;
-  const plub   = precioLubricante || 2200;
+  const pvlsfo = puerto.precio_vlsfo || 1000;
+  const plub   = puerto.precio_lubricante || 2200;
 
   // Fila de consumo para esta velocidad
   const fila = consumos.length > 0
@@ -2116,7 +2037,7 @@ function calcularViaje(escenario, barco, puerto, consumos, tripulacion, velocida
 
 // ─── CARD ESCENARIO ────────────────────────────────────────────────────────
 function CardEscenario({ escenario, barcos, puertos, consumosPorBarco, tripulacionPorBarco,
-                         servicios, precioVlsfo, precioLubricante, onChange, onDelete }) {
+                         servicios, onChange, onDelete }) {
   const [deleting, setDeleting] = useState(false);
 
   const barco   = barcos.find(b => b.id === escenario.barco_id);
@@ -2132,7 +2053,7 @@ function CardEscenario({ escenario, barcos, puertos, consumosPorBarco, tripulaci
   // Calcular resultado para cada velocidad disponible (solo si barco y puerto están definidos)
   const resultadosPorVel = (barco && puerto)
     ? consumos.map(c =>
-        calcularViaje(escenario, barco, puerto, consumos, tripulacion, c.velocidad, precioVlsfo, precioLubricante)
+        calcularViaje(escenario, barco, puerto, consumos, tripulacion, c.velocidad)
       ).filter(Boolean)
     : [];
 
@@ -2315,7 +2236,7 @@ function CardEscenario({ escenario, barcos, puertos, consumosPorBarco, tripulaci
 }
 
 // ─── TAB SERVICIO GENÉRICA ─────────────────────────────────────────────────
-function TabServicio({ tipoServicio, titulo, icono, precioVlsfo, precioLubricante }) {
+function TabServicio({ tipoServicio, titulo, icono }) {
   const [escenarios, setEscenarios]           = useState([]);
   const [barcos, setBarcos]                   = useState([]);
   const [puertos, setPuertos]                 = useState([]);
@@ -2488,8 +2409,6 @@ function TabServicio({ tipoServicio, titulo, icono, precioVlsfo, precioLubricant
           consumosPorBarco={consumosPorBarco}
           tripulacionPorBarco={tripulacionPorBarco}
           servicios={servicios}
-          precioVlsfo={precioVlsfo}
-          precioLubricante={precioLubricante}
           onChange={onChange}
           onDelete={eliminar}
         />
@@ -2542,15 +2461,10 @@ function LoginPage() {
 }
 
 export default function App() {
-  const [session, setSession]     = useState(null);
-  const [loading, setLoading]     = useState(true);
-  const [tab, setTab]             = useState("barcos");
-  const [precioVlsfo, setPrecioVlsfo] = useState(1000);
+  const [session, setSession]   = useState(null);
+  const [loading, setLoading]   = useState(true);
+  const [tab, setTab]           = useState("barcos");
   const [crecimientoPct, setCrecimientoPct] = useState(4);
-  const [precioLubricante, setPrecioLubricante] = useState(2200);
-  const handlePrecioChange = useCallback((precio) => setPrecioVlsfo(precio), []);
-  const handleCrecimientoChange = useCallback((pct) => setCrecimientoPct(pct), []);
-  const handleLubricanteChange = useCallback((precio) => setPrecioLubricante(precio), []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -2583,16 +2497,15 @@ export default function App() {
         ))}
       </nav>
       <div className="page">
-        {tab === "barcos"      && <TabBarcos precioVlsfo={precioVlsfo} />}
+        {tab === "barcos"      && <TabBarcos />}
         {tab === "puertos"     && <TabPuertos />}
-        {tab === "variables"   && <TabVariables onPrecioChange={handlePrecioChange} onCrecimientoChange={handleCrecimientoChange} onLubricanteChange={handleLubricanteChange} />}
-        {tab === "alije"       && <TabServicio tipoServicio="alije"       titulo="Alijes"             icono="⚓" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
-        {tab === "agua"        && <TabServicio tipoServicio="agua"        titulo="Entrega de Agua"    icono="💧" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
-        {tab === "slop"        && <TabServicio tipoServicio="slop"        titulo="Transporte de Slop" icono="🛢️" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
-        {tab === "lubricantes" && <TabServicio tipoServicio="lubricantes" titulo="Lubricantes"        icono="🔧" precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} />}
-        {tab === "pl"          && <TabPL precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
-        {tab === "cashflow"    && <TabCashflow precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
-        {tab === "comparacion" && <TabComparacion precioVlsfo={precioVlsfo} precioLubricante={precioLubricante} crecimientoPct={crecimientoPct} />}
+        {tab === "alije"       && <TabServicio tipoServicio="alije"       titulo="Alijes"             icono="⚓" />}
+        {tab === "agua"        && <TabServicio tipoServicio="agua"        titulo="Entrega de Agua"    icono="💧" />}
+        {tab === "slop"        && <TabServicio tipoServicio="slop"        titulo="Transporte de Slop" icono="🛢️" />}
+        {tab === "lubricantes" && <TabServicio tipoServicio="lubricantes" titulo="Lubricantes"        icono="🔧" />}
+        {tab === "pl"          && <TabPL crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
+        {tab === "cashflow"    && <TabCashflow crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
+        {tab === "comparacion" && <TabComparacion crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
       </div>
     </>
   );
