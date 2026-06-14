@@ -2512,11 +2512,17 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         </div>
     ) : null },
     { label: "TOTAL COSTOS",    calc: (d) => d ? fmtCompact(d.totalCostos) : "—", bold: true, red: true },
-    { sec: "⑦ Resultado" },
+    { sec: "⑦ Resultado por operación" },
     { label: "Mob/Demob · por op.", calc: (d, e) => d ? `${fmtUSD(d.ingresoMD)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultMD)}` : "—", bold: true, result: true },
-    { label: "Mob/Demob · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoMD*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultMD*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
-    { label: "Día zarpe · por op. *", calc: (d, e) => d ? `${fmtUSD(d.ingresoZarpe)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultZarpe)}` : "—", bold: true, result: true },
-    { label: "Día zarpe · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoZarpe*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultZarpe*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
+    ...(isAlije ? [
+      { label: "Día zarpe · por op. *", calc: (d, e) => d ? `${fmtUSD(d.ingresoZarpe)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultZarpe)}` : "—", bold: true, result: true },
+      { sec: "⑧ Resultado anual (100% mercado)" },
+      { label: "Mob/Demob · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoMD*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultMD*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
+      { label: "Día zarpe · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoZarpe*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultZarpe*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
+    ] : [
+      { sec: "⑧ Resultado anual (100% mercado)" },
+      { label: "Anual", calc: (d, e) => d && e ? `${fmtCompact(d.ingresoMD*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultMD*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
+    ]),
   ];
 
   const COL_W = 220;
