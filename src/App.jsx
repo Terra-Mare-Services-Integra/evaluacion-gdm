@@ -2338,7 +2338,14 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const costoEstibaDia = esc.estiba_dia_activo ? (puerto.costo_estiba_dia||0)*Math.ceil(diasSitio)   : 0;
     const costoEstibaTn  = esc.estiba_tn_activo  ? (puerto.costo_estiba_tn||0)*(esc.estiba_tn_cantidad||0)   : 0;
     const costoBunker    = esc.bunker_activo      ? (puerto.costo_bunker_operacion||0)                  : 0;
-    const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker;
+
+    // Costo de producto en puerto (compra agua / descarga slop)
+    const m3Agua      = (esc.m3_agua||0) * (esc.entregas_por_viaje||1);
+    const m3Slop      = (esc.m3_slop||0) * (esc.entregas_por_viaje||1);
+    const costoCompraAgua   = tipoServicio === "agua" ? m3Agua * (puerto.costo_agua_m3||0) : 0;
+    const costoDescargaSlop = tipoServicio === "slop" ? m3Slop * (puerto.costo_slop_m3||0) : 0;
+
+    const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker+costoCompraAgua+costoDescargaSlop;
 
     const totalCostos = totalComb+totalLub+costoTrip+costoViveres+costoZarpe+costoArribo+costoOpVar;
 
@@ -2362,6 +2369,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
       totalComb, totalLub, costoTrip,
       costoViveres, viveresDiaPers, costoZarpe, costoArribo, costoOpVar,
       costoEstibaOp, costoEstibaHs, costoEstibaDia, costoEstibaTn, costoBunker,
+      costoCompraAgua, costoDescargaSlop,
       totalCostos, ingresoMD, ingresoZarpe,
       resultMD: ingresoMD - totalCostos, resultZarpe: ingresoZarpe - totalCostos,
       puerto,
@@ -2445,6 +2453,12 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     { label: "Despacho zarpe",  calc: (d) => d ? fmtCompact(d.costoZarpe)  : "—", red: true },
     { label: "Despacho arribo", calc: (d) => d ? fmtCompact(d.costoArribo) : "—", red: true },
     { label: "Víveres",         calc: (d) => d ? (d.viveresDiaPers > 0 ? fmtCompact(d.costoViveres) : `${d.dotacion}p × ${d.diasEmb}d × $0`) : "—", red: true },
+    ...(isAgua ? [
+      { label: "Compra agua (USD/m³)", calc: (d) => d ? fmtCompact(d.costoCompraAgua) : "—", red: true },
+    ] : []),
+    ...(isSlop ? [
+      { label: "Descarga slop (USD/m³)", calc: (d) => d ? fmtCompact(d.costoDescargaSlop) : "—", red: true },
+    ] : []),
     { sec: "⑥ Costos op. variables" },
     { label: "Estiba / op.",    renderCalc: (e, key, d) => d ? (
         <div style={{display:"flex",alignItems:"center",gap:4,width:"100%"}}>
