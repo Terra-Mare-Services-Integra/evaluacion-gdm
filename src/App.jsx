@@ -1208,345 +1208,387 @@ const ZONAS = [
   { value: "zona_delta", label: "Zona Delta" },
 ];
 
-// ─── MOTOR DE CÁLCULO ─────────────────────────────────────────────────────
-function calcularPL(barco, puerto, servicios, consumos, tripulacion, anios = 7, crecimientoPct = 0) {
+// ─── MOTOR DE CÁLCULO P&L ─────────────────────────────────────────────────
+function calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorBarco, anios = 7) {
   if (!barco || !puerto) return null;
 
   const DIAS_ANIO = 365;
   const resultado = [];
-  const tasaCrecimiento = crecimientoPct / 100;
+  const consumos    = consumosPorBarco[barco.id]    || [];
+  const tripulacion = tripulacionPorBarco[barco.id] || [];
 
   const velCrucero = barco.velocidad_crucero || 8;
-
   const filaVel = consumos.length > 0
-    ? consumos.reduce((prev, curr) =>
-        Math.abs(curr.velocidad - velCrucero) < Math.abs(prev.velocidad - velCrucero) ? curr : prev)
+    ? consumos.reduce((p, c) => Math.abs(c.velocidad - velCrucero) < Math.abs(p.velocidad - velCrucero) ? c : p)
     : null;
+  const pvlsfo    = puerto.precio_vlsfo      || 1000;
+  const plub      = puerto.precio_lubricante || 2200;
+  const cPto      = barco.consumo_puerto     || 0;
+  const lubPtoPct = (barco.lubricante_pct_puerto || 3) / 100;
 
-  const consLastre = filaVel?.consumo_lastre || 0;
-  const consCarga  = filaVel?.consumo_carga  || 0;
-  const consPuerto = barco.consumo_puerto || 0;
-  const lubPct     = (filaVel?.lubricante_pct || 3) / 100;
-  const lubPuertoPct = (barco.lubricante_pct_puerto || 3) / 100;
-  const pvlsfo     = puerto.precio_vlsfo || 1000;
-  const plub       = puerto.precio_lubricante || 2200;
+  const tripNavDia = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0) * (r.costo_dia_navegando || 0), 0);
+  const tripPtoDia = tripulacion.reduce((s, r) => s + (r.cantidad_puerto    || 0) * (r.costo_dia_puerto    || 0), 0);
+  const dotacion   = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0), 0);
 
-  // Costo diario combustible (VLSFO)
-  const costoCombNavLastre = consLastre * pvlsfo;
-  const costoCombNavCarga  = consCarga  * pvlsfo;
-  const costoCombPuerto    = consPuerto * pvlsfo;
+  const opexFijoBase = calcOpexFijo(barco)
+    + (puerto.costo_indirecto_lumpsum || 0) * 12
+    + (puerto.costo_portuario_dia     || 0) * 12;
 
-  // Costo diario lubricante (precio lubricante, no VLSFO)
-  const costoLubNavLastre = consLastre * lubPct * plub;
-  const costoLubNavCarga  = consCarga  * lubPct * plub;
-  const costoLubPuerto    = consPuerto * lubPuertoPct * plub;
-
-  // Tripulación diaria
-  const tripNavegando = tripulacion.reduce((s, r) => s + (r.cantidad_navegando || 0) * (r.costo_dia_navegando || 0), 0);
-  const tripPuerto    = tripulacion.reduce((s, r) => s + (r.cantidad_puerto    || 0) * (r.costo_dia_puerto    || 0), 0);
-
-  // OPEX fijo base anual
-  const opexFijoBase = calcOpexFijo(barco) + (puerto.costo_indirecto_lumpsum || 0) * 12;
+  const escsActivos = escenarios.filter(e => e.barco_id === barco.id && e.puerto_id === puerto.id);
 
   for (let anio = 1; anio <= anios; anio++) {
-    // Días fuera por dry dock este año
-    let diasDrydock = 0;
-    let costoDrydock = 0;
-    const esFull = barco.drydock_full_cada_anios > 0 && anio % barco.drydock_full_cada_anios === 0;
+    let diasDrydock = 0, costoDrydock = 0;
+    const esFull       = barco.drydock_full_cada_anios        > 0 && anio % barco.drydock_full_cada_anios        === 0;
     const esIntermedio = !esFull && barco.drydock_intermedio_cada_anios > 0 && anio % barco.drydock_intermedio_cada_anios === 0;
-
-    if (esFull) {
-      diasDrydock = (barco.drydock_full_meses || 2) * 30;
-      costoDrydock = barco.drydock_full_costo || 0;
-    } else if (esIntermedio) {
-      diasDrydock = (barco.drydock_intermedio_meses || 2) * 30;
-      costoDrydock = barco.drydock_intermedio_costo || 0;
-    }
+    if (esFull)            { diasDrydock = (barco.drydock_full_meses      || 2) * 30; costoDrydock = barco.drydock_full_costo      || 0; }
+    else if (esIntermedio) { diasDrydock = (barco.drydock_intermedio_meses || 2) * 30; costoDrydock = barco.drydock_intermedio_costo || 0; }
 
     const diasDisponibles = DIAS_ANIO - diasDrydock;
 
-    // Calcular días operativos por servicio
-    let ingresos = 0;
-    let opexVariable = 0;
+    let ingresos = 0, costosCombustible = 0, costosLubricante = 0;
+    let costosTripulacion = 0, costosViveres = 0, costosPortuarios = 0;
+    let costosProducto = 0, costosSlopLogistica = 0;
     let diasOperativos = 0;
+    const detalleServicios = [];
 
-    for (const srv of servicios.filter(s => s.activo)) {
-      const opsBase = srv.operaciones_anio || 0;
-      const ops = opsBase * Math.pow(1 + tasaCrecimiento, anio - 1);
-      if (ops === 0) continue;
+    for (const esc of escsActivos) {
+      const ms0     = (esc.market_share_0   || 0) / 100;
+      const tc      = (esc.tasa_crecimiento || 0) / 100;
+      const mercado = esc.operaciones_anio  || 0;
+      const entregas = esc.entregas_por_viaje || 1;
+      const esAgua  = esc.tipo_servicio === "agua";
+      const esSlop  = esc.tipo_servicio === "slop";
 
-      // Distancia al sitio (ida)
-      const distZona = srv.zona === "zona_comun" ? (puerto.dist_zona_comun || 0)
-                     : srv.zona === "zona_alfa"  ? (puerto.dist_zona_alfa  || 0)
-                     : (puerto.dist_zona_delta   || 0);
+      const viajesCapturados = (esAgua || esSlop)
+        ? (mercado * ms0 * Math.pow(1 + tc, anio - 1)) / entregas
+        :  mercado * ms0 * Math.pow(1 + tc, anio - 1);
 
-      const hsNavIda  = velCrucero > 0 ? distZona / velCrucero : 0;
-      const diasNavIda = hsNavIda / 24;
-      const diasNavTotal = diasNavIda * 2; // ida + vuelta
-      const diasSitio = (srv.dias_promedio_sitio || srv.dias_operacion || 0);
-      const diasPorOp = diasNavTotal + diasSitio;
+      if (viajesCapturados <= 0) continue;
 
-      diasOperativos += ops * diasPorOp;
+      const dist      = esc.zona === "zona_comun" ? (puerto.dist_zona_comun || 0)
+                      : esc.zona === "zona_alfa"  ? (puerto.dist_zona_alfa  || 0)
+                      : (puerto.dist_zona_delta   || 0);
+      const diasAlist  = (esc.hs_alistamiento || 12) / 24;
+      const diasDesarm = (esc.hs_desarmado    || 4)  / 24;
+      const diasNavIda = velCrucero > 0 ? (dist / velCrucero) / 24 : 0;
+      const diasSitio  = esc.dias_operacion || 1;
+      const diasViaje  = diasAlist + diasNavIda + diasSitio + diasNavIda + diasDesarm;
+      const diasEmb    = Math.ceil(diasViaje);
+      diasOperativos  += viajesCapturados * diasViaje;
 
-      // Ingresos
-      if (srv.tipo === "alije") {
-        if (srv.modalidad_pago === "mob_dia_operado") {
-          ingresos += ops * ((srv.mob_demob_usd || 0) + diasSitio * (srv.tarifa_dia_operando || 0));
-        } else {
-          ingresos += ops * diasPorOp * (srv.tarifa_dia_navegando || 0);
-        }
-      } else if (srv.tipo === "agua" || srv.tipo === "slop") {
-        ingresos += ops * (srv.precio_unitario || 0) * (srv.m3_promedio_viaje || 0) * (srv.entregas_por_viaje || 1);
-      } else if (srv.tipo === "lubricantes") {
-        ingresos += ops * (srv.precio_unitario || 0) * (srv.drums_promedio_viaje || 0);
-      }
+      const cargaIda = esc.carga_ida    || (esc.tipo_servicio === "lubricantes" ? "cargado" : "lastre");
+      const cargaVta = esc.carga_vuelta || (esSlop ? "cargado" : "lastre");
+      const lubPct   = (filaVel?.lubricante_pct || 3) / 100;
+      const cIda     = cargaIda === "cargado" ? (filaVel?.consumo_carga || 0) : (filaVel?.consumo_lastre || 0);
+      const cVta     = cargaVta === "cargado" ? (filaVel?.consumo_carga || 0) : (filaVel?.consumo_lastre || 0);
 
-      // OPEX variable por operación
-      // Combustible navegando (lastre ida, carga vuelta para agua/slop — simplificamos con promedio)
-      const costoCombNav = ops * diasNavTotal * ((costoCombNavLastre + costoCombNavCarga) / 2 + (costoLubNavLastre + costoLubNavCarga) / 2);
-      const costoCombSitio = ops * diasSitio * (costoCombPuerto + costoLubPuerto);
-      const costoTrip = ops * (diasNavTotal * tripNavegando + diasSitio * tripPuerto);
-      const costoPuertoOp = ops * ((puerto.costo_estiba || 0) + (puerto.costo_bunker_operacion || 0) + (puerto.costo_despacho_operacion || 0));
+      const combV = (diasAlist+diasSitio+diasDesarm)*cPto*pvlsfo + diasNavIda*(cIda+cVta)*pvlsfo;
+      const lubV  = (diasAlist+diasSitio+diasDesarm)*cPto*lubPtoPct*plub + diasNavIda*(cIda+cVta)*lubPct*plub;
+      const tripV = diasEmb * tripNavDia;
+      const vivV  = diasEmb * dotacion * (puerto.viveres_dia_persona || 0);
+      const ptoV  = (puerto.costo_despacho_zarpe || 0) + (puerto.costo_despacho_arribo || 0);
+      const estV  = (esc.estiba_op_activo  ? (puerto.costo_estiba       || 0) : 0)
+                  + (esc.estiba_hs_activo  ? (puerto.costo_estiba_hora  || 0) * (esc.estiba_hs_cantidad  || 0) : 0)
+                  + (esc.estiba_dia_activo ? (puerto.costo_estiba_dia   || 0) * Math.ceil(diasSitio) : 0)
+                  + (esc.estiba_tn_activo  ? (puerto.costo_estiba_tn    || 0) * (esc.estiba_tn_cantidad  || 0) : 0)
+                  + (esc.bunker_activo      ? (puerto.costo_bunker_operacion || 0) : 0);
+      const m3Tot = (esAgua ? (esc.m3_agua || 0) : esSlop ? (esc.m3_slop || 0) : 0) * entregas;
+      const prodV = esAgua ? m3Tot*(puerto.costo_agua_m3 || 0) : esSlop ? m3Tot*(puerto.costo_slop_m3 || 0) : 0;
+      const slopV = esSlop ? (esc.camiones_cantidad||0)*(puerto.costo_camion_unitario||0) + m3Tot*(puerto.costo_disposicion_m3||0) : 0;
 
-      // Costos específicos agua/slop
-      let costoServicio = 0;
-      if (srv.tipo === "agua") costoServicio = ops * (puerto.costo_agua_m3 || 0) * (srv.m3_promedio_viaje || 0) * (srv.entregas_por_viaje || 1);
-      if (srv.tipo === "slop") costoServicio = ops * (puerto.costo_slop_m3 || 0) * (srv.m3_promedio_viaje || 0) * (srv.entregas_por_viaje || 1);
+      let ingrV = 0;
+      if (esc.tipo_servicio === "alije")       ingrV = (esc.mob_demob_usd||0) + diasSitio*(esc.tarifa_dia_operando||0);
+      else if (esAgua || esSlop)               ingrV = (esAgua?(esc.m3_agua||0):(esc.m3_slop||0))*entregas*(esc.precio_unitario||0);
+      else if (esc.tipo_servicio === "lubricantes") ingrV = (esc.drums_lubricante||0)*(esc.precio_unitario||0);
 
-      opexVariable += costoCombNav + costoCombSitio + costoTrip + costoPuertoOp + costoServicio;
+      ingresos            += viajesCapturados * ingrV;
+      costosCombustible   += viajesCapturados * combV;
+      costosLubricante    += viajesCapturados * lubV;
+      costosTripulacion   += viajesCapturados * tripV;
+      costosViveres       += viajesCapturados * vivV;
+      costosPortuarios    += viajesCapturados * (ptoV + estV);
+      costosProducto      += viajesCapturados * prodV;
+      costosSlopLogistica += viajesCapturados * slopV;
+
+      detalleServicios.push({
+        tipo: esc.tipo_servicio, zona: esc.zona,
+        viajes: Math.round(viajesCapturados * 10) / 10,
+        ingreso: viajesCapturados * ingrV,
+        costo:   viajesCapturados * (combV+lubV+tripV+vivV+ptoV+estV+prodV+slopV),
+        resultado: viajesCapturados * (ingrV - combV-lubV-tripV-vivV-ptoV-estV-prodV-slopV),
+      });
     }
 
-    // Días en puerto (no operativos, no drydock)
-    const diasEnPuerto = Math.max(0, diasDisponibles - diasOperativos);
-    const costoCombPuertoAnual = diasEnPuerto * (costoCombPuerto + costoLubPuerto);
-    const costoTripPuertoAnual = diasEnPuerto * tripPuerto;
-    // costo_portuario_dia es amarre mensual — se suma al OPEX fijo anual (× 12)
-    const costoAmarreMensual = (puerto.costo_portuario_dia || 0) * 12;
+    // Días idle
+    const diasIdle  = Math.max(0, diasDisponibles - diasOperativos);
+    costosCombustible += diasIdle * cPto * pvlsfo;
+    costosLubricante  += diasIdle * cPto * lubPtoPct * plub;
+    costosTripulacion += diasIdle * tripPtoDia;
 
-    opexVariable += costoCombPuertoAnual + costoTripPuertoAnual;
-
-    const opexTotal = opexFijoBase + opexVariable + costoDrydock + costoAmarreMensual;
-
-    // D&A
-    const capexTotal = (barco.precio_compra || 0) * (1 + (barco.arancel_pct || 0) / 100) + (barco.capex_refit || 0);
-    const vidaUtil = barco.vida_util || 20;
-    const da = vidaUtil > 0 ? capexTotal / vidaUtil : 0;
-
-    const ebitda = ingresos - opexTotal;
-    const ebit   = ebitda - da;
-    const impuesto = ebit > 0 ? ebit * 0.35 : 0;
+    const opexVariable  = costosCombustible+costosLubricante+costosTripulacion+costosViveres+costosPortuarios+costosProducto+costosSlopLogistica;
+    const capexTotal    = (barco.precio_compra||0)*(1+(barco.arancel_pct||0)/100)+(barco.capex_refit||0);
+    const da            = (barco.vida_util||20) > 0 ? capexTotal/(barco.vida_util||20) : 0;
+    const opexTotal     = opexFijoBase + opexVariable + costoDrydock;
+    const ebitda        = ingresos - opexTotal;
+    const ebit          = ebitda - da;
+    const impuesto      = ebit > 0 ? ebit * 0.35 : 0;
     const resultadoNeto = ebit - impuesto;
-
-    // FCO = resultado neto + D&A (la depreciación no es salida de caja)
-    const fco = resultadoNeto + da;
-    // Valor residual: se realiza en el año de salida configurado (no siempre el último año del modelo)
-    const anioSalida = barco.anio_salida || anios;
-    const valorResidual = anio === anioSalida ? (barco.precio_compra || 0) * (barco.valor_residual_pct || 0) : 0;
+    const fco           = resultadoNeto + da;
+    const anioSalida    = barco.anio_salida || anios;
+    const valorResidual = anio === anioSalida ? (barco.precio_compra||0)*(barco.valor_residual_pct||0) : 0;
 
     resultado.push({
       anio: 2025 + anio - 1,
-      diasDisponibles,
-      diasOperativos: Math.min(diasOperativos, diasDisponibles),
-      diasDrydock,
-      ingresos,
-      opexVariable,
-      opexFijo: opexFijoBase,
-      costoDrydock,
-      opexTotal,
-      ebitda,
-      margenEbitda: ingresos > 0 ? ebitda / ingresos : 0,
-      da,
-      ebit,
-      impuesto,
-      resultadoNeto,
-      fco,
-      valorResidual,
+      diasDisponibles, diasOperativos: Math.min(Math.round(diasOperativos), diasDisponibles),
+      diasIdle: Math.round(diasIdle), diasDrydock,
+      ingresos, costosCombustible, costosLubricante, costosTripulacion,
+      costosViveres, costosPortuarios, costosProducto, costosSlopLogistica,
+      opexVariable, opexFijo: opexFijoBase, costoDrydock, opexTotal,
+      ebitda, margenEbitda: ingresos > 0 ? ebitda/ingresos : 0,
+      da, ebit, impuesto, resultadoNeto, fco, valorResidual,
+      detalleServicios,
     });
   }
 
-  // TIR / VAN / MOIC
-  const capexInicial = (barco.precio_compra || 0) * (1 + (barco.arancel_pct || 0) / 100) + (barco.capex_refit || 0);
-  const flujos = resultado.map((r, i) => r.fco + (i === resultado.length - 1 ? r.valorResidual : 0));
-  const tir = calcTIR([-capexInicial, ...flujos]);
-  const van = calcVAN([-capexInicial, ...flujos], 0.12);
-  const totalRetornado = flujos.reduce((s, f) => s + f, 0);
-  const moic = capexInicial > 0 ? (totalRetornado + capexInicial) / capexInicial : 0;
+  const capexInicial   = (barco.precio_compra||0)*(1+(barco.arancel_pct||0)/100)+(barco.capex_refit||0);
+  const flujos         = resultado.map((r, i) => r.fco + (i===resultado.length-1 ? r.valorResidual : 0));
+  const tir            = calcTIR([-capexInicial, ...flujos]);
+  const van            = calcVAN([-capexInicial, ...flujos], 0.12);
+  const totalRetornado = flujos.reduce((s, f) => s+f, 0);
+  const moic           = capexInicial > 0 ? totalRetornado/capexInicial : 0;
 
   return { anios: resultado, tir, van, moic, capexInicial };
 }
 
 function calcTIR(flujos, guess = 0.1) {
-  // Newton-Raphson
   let r = guess;
   for (let i = 0; i < 1000; i++) {
     let npv = 0, dnpv = 0;
     for (let t = 0; t < flujos.length; t++) {
-      npv  += flujos[t] / Math.pow(1 + r, t);
-      dnpv -= t * flujos[t] / Math.pow(1 + r, t + 1);
+      npv  += flujos[t] / Math.pow(1+r, t);
+      dnpv -= t * flujos[t] / Math.pow(1+r, t+1);
     }
     if (Math.abs(dnpv) < 1e-10) break;
-    const r2 = r - npv / dnpv;
-    if (Math.abs(r2 - r) < 1e-8) { r = r2; break; }
+    const r2 = r - npv/dnpv;
+    if (Math.abs(r2-r) < 1e-8) { r = r2; break; }
     r = r2;
   }
   return isFinite(r) && r > -1 ? r : null;
 }
 
 function calcVAN(flujos, tasa) {
-  return flujos.reduce((sum, f, t) => sum + f / Math.pow(1 + tasa, t), 0);
+  return flujos.reduce((sum, f, t) => sum + f/Math.pow(1+tasa, t), 0);
 }
 
 // ─── TAB P&L ───────────────────────────────────────────────────────────────
-function TabPL({ crecimientoPct = 0 }) {
-  const [barcos, setBarcos]       = useState([]);
-  const [puertos, setPuertos]     = useState([]);
-  const [consumos, setConsumos]   = useState([]);
-  const [tripulacion, setTripulacion] = useState([]);
-  const [servicios, setServicios] = useState([]);
-  const [barcoId, setBarcoId]     = useState("");
-  const [puertoId, setPuertoId]   = useState("");
-  const [loading, setLoading]     = useState(true);
-  const [msg, setMsg]             = useState(null);
+// ─── TAB P&L ───────────────────────────────────────────────────────────────
+function TabPL({ crecimientoPct = 0, onCrecimientoChange }) {
+  const [barcos, setBarcos]                       = useState([]);
+  const [puertos, setPuertos]                     = useState([]);
+  const [escenarios, setEscenarios]               = useState([]);
+  const [consumosPorBarco, setConsumosPorBarco]   = useState({});
+  const [tripulacionPorBarco, setTripulacionPorBarco] = useState({});
+  const [barcoId, setBarcoId]                     = useState("");
+  const [puertoId, setPuertoId]                   = useState("");
+  const [anios, setAnios]                         = useState(7);
+  const [loading, setLoading]                     = useState(true);
+  const [msg, setMsg]                             = useState(null);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [rb, rp, rs] = await Promise.all([
+        const [rb, rp, re] = await Promise.all([
           supabase.from(TABLE_BARCOS).select("*").order("created_at"),
           supabase.from(TABLE_PUERTOS).select("*").order("orden"),
-          supabase.from(TABLE_SERVICIOS).select("*").order("orden"),
+          supabase.from(TABLE_ESCENARIOS_SERVICIO).select("*"),
         ]);
         if (rb.error) throw rb.error;
         if (rp.error) throw rp.error;
-        if (rs.error) throw rs.error;
+        if (re.error) throw re.error;
         setBarcos(rb.data || []);
         setPuertos(rp.data || []);
-        setServicios(rs.data || []);
+        setEscenarios(re.data || []);
         if (rb.data?.length > 0) setBarcoId(rb.data[0].id);
         if (rp.data?.length > 0) setPuertoId(rp.data[0].id);
+
+        const cm = {}, tm = {};
+        await Promise.all((rb.data||[]).map(async b => {
+          const [rc, rt] = await Promise.all([
+            supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", b.id).order("orden"),
+            supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id", b.id).order("orden"),
+          ]);
+          cm[b.id] = rc.data || [];
+          tm[b.id] = rt.data || [];
+        }));
+        setConsumosPorBarco(cm);
+        setTripulacionPorBarco(tm);
       } catch (e) {
-        setMsg({ type: "err", text: `Error al cargar datos: ${e.message}` });
+        setMsg({ type:"err", text:`Error: ${e.message}` });
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  useEffect(() => {
-    if (!barcoId) return;
-    (async () => {
-      try {
-        const [rc, rt] = await Promise.all([
-          supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", barcoId).order("orden"),
-          supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id", barcoId).order("orden"),
-        ]);
-        if (rc.error) throw rc.error;
-        if (rt.error) throw rt.error;
-        setConsumos(rc.data || []);
-        setTripulacion(rt.data || []);
-      } catch (e) {
-        setMsg({ type: "err", text: `Error al cargar datos del barco: ${e.message}` });
-      }
-    })();
-  }, [barcoId]);
-
-  if (loading) return <div className="empty-state">Cargando datos...</div>;
+  if (loading) return <div className="empty-state">Cargando...</div>;
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, 7, crecimientoPct) : null;
+  const pl     = barco && puerto
+    ? calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorBarco, anios)
+    : null;
+
+  const TIPO_LABEL = { alije:"Alije", agua:"Agua", slop:"Slop", lubricantes:"Lubricantes" };
+  const ZONA_LABEL_SHORT = { zona_comun:"Común", zona_alfa:"Alfa", zona_delta:"Delta" };
+
+  const fmtPct = (v) => v != null ? `${(v*100).toFixed(1)}%` : "N/A";
 
   return (
     <div>
-      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
+      {msg && <div className={`msg msg-err`}>{msg.text}</div>}
 
-      {/* Selectores */}
+      {/* Controles */}
       <div className="card" style={{marginBottom:12}}>
-        <div className="g2">
-          <div className="campo">
+        <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div className="campo" style={{flex:"1 1 180px",margin:0}}>
             <div className="campo-label">Barco</div>
             <select className="campo-input" value={barcoId} onChange={e => setBarcoId(e.target.value)}>
               {barcos.map(b => <option key={b.id} value={b.id}>🚢 {b.nombre}</option>)}
             </select>
           </div>
-          <div className="campo">
-            <div className="campo-label">Puerto base</div>
+          <div className="campo" style={{flex:"1 1 180px",margin:0}}>
+            <div className="campo-label">Puerto de salida</div>
             <select className="campo-input" value={puertoId} onChange={e => setPuertoId(e.target.value)}>
               {puertos.map(p => <option key={p.id} value={p.id}>🏗️ {p.nombre}</option>)}
+            </select>
+          </div>
+          <div className="campo" style={{flex:"0 0 100px",margin:0}}>
+            <div className="campo-label">Años del modelo</div>
+            <select className="campo-input" value={anios} onChange={e => setAnios(Number(e.target.value))}>
+              {[3,5,7,10].map(n => <option key={n} value={n}>{n} años</option>)}
             </select>
           </div>
         </div>
       </div>
 
-      {!pl && (
-        <div className="empty-state">Seleccioná un barco y un puerto para ver el P&L.</div>
-      )}
+      {!pl && <div className="empty-state">No hay escenarios activos para este barco y puerto. Configuralos en las tabs de servicio.</div>}
 
       {pl && (
         <>
           {/* KPIs */}
-          <div className="kpis" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
             {[
-              { label: "TIR", val: pl.tir !== null ? `${(pl.tir * 100).toFixed(1)}%` : "N/A", cls: pl.tir !== null && pl.tir > 0.12 ? "green" : pl.tir !== null ? "red" : "" },
-              { label: "VAN (12%)", val: fmtCompact(pl.van), cls: pl.van > 0 ? "green" : "red" },
-              { label: "MOIC", val: `${pl.moic.toFixed(2)}x`, cls: pl.moic > 1.5 ? "green" : "" },
-              { label: "CAPEX inicial", val: fmtCompact(pl.capexInicial), cls: "" },
-              { label: "EBITDA año 1", val: fmtCompact(pl.anios[0]?.ebitda), cls: pl.anios[0]?.ebitda > 0 ? "green" : "red" },
-              { label: "Margen EBITDA", val: `${((pl.anios[0]?.margenEbitda || 0) * 100).toFixed(1)}%`, cls: "" },
+              { label:"CAPEX",    val: pl.capexInicial > 0 ? fmtCompact(pl.capexInicial) : "Sin inversión" },
+              { label:"TIR",      val: pl.tir != null ? fmtPct(pl.tir) : "N/A", green: pl.tir > 0.12 },
+              { label:"VAN (12%)",val: pl.van != null ? fmtCompact(pl.van) : "N/A", green: pl.van > 0 },
+              { label:"MOIC",     val: pl.moic > 0 ? `${pl.moic.toFixed(2)}×` : "N/A", green: pl.moic > 1 },
             ].map(k => (
-              <div key={k.label} style={{flex:1,minWidth:90,background: k.cls === "green" ? "var(--green-bg)" : k.cls === "red" ? "var(--red-bg)" : "var(--bg)",border:`1px solid ${k.cls === "green" ? "var(--green-border)" : k.cls === "red" ? "var(--red-border)" : "var(--border)"}`,borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontSize:18,fontWeight:800,fontFamily:"var(--mono)",color: k.cls === "green" ? "var(--green)" : k.cls === "red" ? "var(--red)" : "var(--navy)"}}>{k.val}</div>
+              <div key={k.label} style={{flex:"1 1 100px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:800,color: k.green ? "var(--green)" : "var(--navy)"}}>{k.val}</div>
                 <div style={{fontSize:8,color:"var(--muted)",textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>{k.label}</div>
               </div>
             ))}
           </div>
 
           {/* Tabla P&L */}
-          <div className="card">
-            <div className="sec">Estado de Resultados — {barco.nombre} · {puerto.nombre}</div>
-            <div style={{overflowX:"auto"}}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{textAlign:"left",width:200}}>Concepto</th>
-                    {pl.anios.map(a => <th key={a.anio}>{a.anio}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { label: "Días disponibles",   key: "diasDisponibles",   fmt: n => `${Math.round(n)}d`, bold: false, muted: true },
-                    { label: "Días operativos",     key: "diasOperativos",    fmt: n => `${Math.round(n)}d`, bold: false, muted: true },
-                    { label: "Días dry dock",       key: "diasDrydock",       fmt: n => n > 0 ? `${Math.round(n)}d` : "—", bold: false, muted: true },
-                    { label: "INGRESOS",            key: "ingresos",          fmt: fmtUSD, bold: true,  muted: false },
-                    { label: "OPEX Variable",       key: "opexVariable",      fmt: n => fmtUSD(-n), bold: false, muted: false, red: true },
-                    { label: "OPEX Fijo",           key: "opexFijo",          fmt: n => fmtUSD(-n), bold: false, muted: false, red: true },
-                    { label: "Dry dock",            key: "costoDrydock",      fmt: n => n > 0 ? fmtUSD(-n) : "—", bold: false, muted: false, red: true },
-                    { label: "EBITDA",              key: "ebitda",            fmt: fmtUSD, bold: true,  muted: false, green: true },
-                    { label: "Margen EBITDA",       key: "margenEbitda",      fmt: n => `${(n*100).toFixed(1)}%`, bold: false, muted: true },
-                    { label: "D&A",                 key: "da",                fmt: n => fmtUSD(-n), bold: false, muted: true },
-                    { label: "EBIT",                key: "ebit",              fmt: fmtUSD, bold: true,  muted: false },
-                    { label: "Impuesto (35%)",      key: "impuesto",          fmt: n => fmtUSD(-n), bold: false, muted: false, red: true },
-                    { label: "RESULTADO NETO",      key: "resultadoNeto",     fmt: fmtUSD, bold: true,  muted: false, green: true },
-                  ].map(row => (
-                    <tr key={row.label} style={{background: row.bold ? "var(--bg)" : "transparent"}}>
-                      <td style={{fontWeight: row.bold ? 800 : 500, color: row.muted ? "var(--muted)" : "var(--navy)", fontSize: row.bold ? 12 : 11}}>
-                        {row.label}
-                      </td>
-                      {pl.anios.map(a => (
-                        <td key={a.anio} style={{
-                          textAlign:"right", fontFamily:"var(--mono)", fontWeight: row.bold ? 800 : 400,
-                          color: row.green ? "var(--green)" : row.red ? "var(--red)" : row.muted ? "var(--muted)" : "var(--navy)",
-                          fontSize: row.bold ? 12 : 11,
-                        }}>
-                          {row.fmt(a[row.key])}
-                        </td>
-                      ))}
-                    </tr>
+          <div style={{overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",tableLayout:"fixed",
+              width: 220 + 120 * pl.anios.length, fontSize:11}}>
+              <colgroup>
+                <col style={{width:220}} />
+                {pl.anios.map((_, i) => <col key={i} style={{width:120}} />)}
+              </colgroup>
+              <thead>
+                <tr style={{background:"var(--navy)"}}>
+                  <th style={{padding:"8px 12px",textAlign:"left",color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>Concepto</th>
+                  {pl.anios.map(a => (
+                    <th key={a.anio} style={{padding:"8px 8px",textAlign:"right",color:"#fff",fontSize:11,fontWeight:700}}>{a.anio}</th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Detalle por servicio */}
+                {(() => {
+                  const tipos = [...new Set(pl.anios.flatMap(a => a.detalleServicios.map(d => `${d.tipo}_${d.zona}`)))];
+                  return tipos.length > 0 ? <>
+                    <tr><td colSpan={1+pl.anios.length} style={{padding:"4px 12px",background:"#EEF2F7",fontSize:8,fontWeight:800,color:"var(--blue)",textTransform:"uppercase",letterSpacing:1.5,borderTop:"2px solid var(--border)"}}>Ingresos por servicio</td></tr>
+                    {tipos.map(tk => {
+                      const [tipo, zona] = tk.split("_").reduce((a,v,i,arr) => i===0?[v,""]:[a[0],a[1]+(i>1?"_":"")+v], ["",""]);
+                      return (
+                        <tr key={tk} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <td style={{padding:"4px 12px 4px 20px",color:"var(--muted)",fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                            {TIPO_LABEL[tipo]||tipo} · {ZONA_LABEL_SHORT[zona]||zona}
+                          </td>
+                          {pl.anios.map(a => {
+                            const d = a.detalleServicios.find(x => `${x.tipo}_${x.zona}` === tk);
+                            return <td key={a.anio} style={{padding:"4px 8px",textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{d ? fmtCompact(d.ingreso) : "—"}</td>;
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </> : null;
+                })()}
+
+                {[
+                  { label:"INGRESOS TOTALES",     key:"ingresos",            bold:true, green:true, sep:true },
+                  { label:"Combustible",           key:"costosCombustible",   red:true },
+                  { label:"Lubricante",            key:"costosLubricante",    red:true },
+                  { label:"Tripulación",           key:"costosTripulacion",   red:true },
+                  { label:"Víveres",               key:"costosViveres",       red:true },
+                  { label:"Costos portuarios",     key:"costosPortuarios",    red:true },
+                  { label:"Costo de producto",     key:"costosProducto",      red:true },
+                  { label:"Logística slop",        key:"costosSlopLogistica", red:true },
+                  { label:"OPEX VARIABLE",         key:"opexVariable",        bold:true, red:true, sep:true },
+                  { label:"OPEX fijo",             key:"opexFijo",            red:true },
+                  { label:"Dry dock",              key:"costoDrydock",        red:true },
+                  { label:"OPEX TOTAL",            key:"opexTotal",           bold:true, red:true, sep:true },
+                  { label:"EBITDA",                key:"ebitda",              bold:true, sep:true, signed:true },
+                  { label:"Margen EBITDA",         fmt:(a)=>fmtPct(a.margenEbitda), sep:false },
+                  { label:"D&A",                   key:"da",                  red:true },
+                  { label:"EBIT",                  key:"ebit",                bold:true, signed:true },
+                  { label:"Impuesto (35%)",        key:"impuesto",            red:true },
+                  { label:"RESULTADO NETO",        key:"resultadoNeto",       bold:true, sep:true, signed:true },
+                  { label:"+ D&A (no caja)",       key:"da",                  },
+                  { label:"FCO",                   key:"fco",                 bold:true, signed:true, sep:true },
+                  { label:"Valor residual",        key:"valorResidual",       green:true },
+                  { label:"Días operativos",       fmt:(a)=>`${a.diasOperativos}d` },
+                  { label:"Días idle",             fmt:(a)=>`${a.diasIdle}d` },
+                  { label:"Días dry dock",         fmt:(a)=>a.diasDrydock>0?`${a.diasDrydock}d`:"—" },
+                ].map((row, ri) => (
+                  <tr key={ri}
+                    onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{
+                      padding: row.sep ? "5px 12px" : "3px 12px",
+                      fontWeight: row.bold ? 800 : 400,
+                      color: row.bold ? "var(--navy)" : "var(--muted)",
+                      fontSize: row.bold ? 11 : 10,
+                      borderTop: row.sep ? "2px solid var(--border)" : "none",
+                      whiteSpace:"nowrap",
+                    }}>{row.label}</td>
+                    {pl.anios.map(a => {
+                      const val = row.fmt ? row.fmt(a) : row.key ? a[row.key] : null;
+                      const isNeg = typeof val === "number" && val < 0;
+                      const color = row.green ? "var(--green)"
+                                  : row.red   ? "var(--red)"
+                                  : row.signed ? (isNeg ? "var(--red)" : "var(--green)")
+                                  : "var(--navy)";
+                      return (
+                        <td key={a.anio} style={{
+                          padding: row.sep ? "5px 8px" : "3px 8px",
+                          textAlign:"right",fontFamily:"var(--mono)",
+                          fontWeight: row.bold ? 800 : 400,
+                          color, borderTop: row.sep ? "2px solid var(--border)" : "none",
+                        }}>
+                          {typeof val === "number" ? fmtCompact(val) : val ?? "—"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -1555,190 +1597,167 @@ function TabPL({ crecimientoPct = 0 }) {
 }
 
 // ─── TAB CASHFLOW ──────────────────────────────────────────────────────────
-function TabCashflow({ crecimientoPct = 0 }) {
-  const [barcos, setBarcos]       = useState([]);
-  const [puertos, setPuertos]     = useState([]);
-  const [consumos, setConsumos]   = useState([]);
-  const [tripulacion, setTripulacion] = useState([]);
-  const [servicios, setServicios] = useState([]);
-  const [barcoId, setBarcoId]     = useState("");
-  const [puertoId, setPuertoId]   = useState("");
-  const [loading, setLoading]     = useState(true);
-  const [msg, setMsg]             = useState(null);
+function TabCashflow({ crecimientoPct = 0, onCrecimientoChange }) {
+  const [barcos, setBarcos]                       = useState([]);
+  const [puertos, setPuertos]                     = useState([]);
+  const [escenarios, setEscenarios]               = useState([]);
+  const [consumosPorBarco, setConsumosPorBarco]   = useState({});
+  const [tripulacionPorBarco, setTripulacionPorBarco] = useState({});
+  const [barcoId, setBarcoId]                     = useState("");
+  const [puertoId, setPuertoId]                   = useState("");
+  const [anios, setAnios]                         = useState(7);
+  const [loading, setLoading]                     = useState(true);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [rb, rp, rs] = await Promise.all([
+        const [rb, rp, re] = await Promise.all([
           supabase.from(TABLE_BARCOS).select("*").order("created_at"),
           supabase.from(TABLE_PUERTOS).select("*").order("orden"),
-          supabase.from(TABLE_SERVICIOS).select("*").order("orden"),
+          supabase.from(TABLE_ESCENARIOS_SERVICIO).select("*"),
         ]);
-        if (rb.error) throw rb.error;
-        if (rp.error) throw rp.error;
-        if (rs.error) throw rs.error;
-        setBarcos(rb.data || []);
-        setPuertos(rp.data || []);
-        setServicios(rs.data || []);
+        if (rb.error||rp.error||re.error) throw rb.error||rp.error||re.error;
+        setBarcos(rb.data||[]); setPuertos(rp.data||[]); setEscenarios(re.data||[]);
         if (rb.data?.length > 0) setBarcoId(rb.data[0].id);
         if (rp.data?.length > 0) setPuertoId(rp.data[0].id);
-      } catch (e) {
-        setMsg({ type: "err", text: `Error al cargar datos: ${e.message}` });
-      } finally {
-        setLoading(false);
-      }
+        const cm={}, tm={};
+        await Promise.all((rb.data||[]).map(async b => {
+          const [rc,rt] = await Promise.all([
+            supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id",b.id).order("orden"),
+            supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id",b.id).order("orden"),
+          ]);
+          cm[b.id]=rc.data||[]; tm[b.id]=rt.data||[];
+        }));
+        setConsumosPorBarco(cm); setTripulacionPorBarco(tm);
+      } catch(e) { console.error(e); }
+      finally { setLoading(false); }
     })();
   }, []);
 
-  useEffect(() => {
-    if (!barcoId) return;
-    (async () => {
-      try {
-        const [rc, rt] = await Promise.all([
-          supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", barcoId).order("orden"),
-          supabase.from(TABLE_TRIPULACION).select("*").eq("barco_id", barcoId).order("orden"),
-        ]);
-        if (rc.error) throw rc.error;
-        if (rt.error) throw rt.error;
-        setConsumos(rc.data || []);
-        setTripulacion(rt.data || []);
-      } catch (e) {
-        setMsg({ type: "err", text: `Error al cargar datos del barco: ${e.message}` });
-      }
-    })();
-  }, [barcoId]);
-
-  if (loading) return <div className="empty-state">Cargando datos...</div>;
+  if (loading) return <div className="empty-state">Cargando...</div>;
 
   const barco  = barcos.find(b => b.id === barcoId);
   const puerto = puertos.find(p => p.id === puertoId);
-  const pl = barco && puerto ? calcularPL(barco, puerto, servicios, consumos, tripulacion, 7, crecimientoPct) : null;
-
-  // Saldo acumulado calculado fuera del render para evitar mutación en JSX
-  const saldosAcum = pl ? pl.anios.reduce((acc, a) => {
-    const prev = acc.length > 0 ? acc[acc.length - 1] : -pl.capexInicial;
-    acc.push(prev + a.fco + a.valorResidual);
-    return acc;
-  }, []) : [];
+  const pl     = barco && puerto
+    ? calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorBarco, anios)
+    : null;
 
   return (
     <div>
-      {msg && <div className={`msg ${msg.type === "err" ? "msg-err" : "msg-ok"}`}>{msg.text}</div>}
-
+      {/* Controles */}
       <div className="card" style={{marginBottom:12}}>
-        <div className="g2">
-          <div className="campo">
+        <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div className="campo" style={{flex:"1 1 180px",margin:0}}>
             <div className="campo-label">Barco</div>
             <select className="campo-input" value={barcoId} onChange={e => setBarcoId(e.target.value)}>
               {barcos.map(b => <option key={b.id} value={b.id}>🚢 {b.nombre}</option>)}
             </select>
           </div>
-          <div className="campo">
-            <div className="campo-label">Puerto base</div>
+          <div className="campo" style={{flex:"1 1 180px",margin:0}}>
+            <div className="campo-label">Puerto de salida</div>
             <select className="campo-input" value={puertoId} onChange={e => setPuertoId(e.target.value)}>
               {puertos.map(p => <option key={p.id} value={p.id}>🏗️ {p.nombre}</option>)}
+            </select>
+          </div>
+          <div className="campo" style={{flex:"0 0 100px",margin:0}}>
+            <div className="campo-label">Años</div>
+            <select className="campo-input" value={anios} onChange={e => setAnios(Number(e.target.value))}>
+              {[3,5,7,10].map(n => <option key={n} value={n}>{n} años</option>)}
             </select>
           </div>
         </div>
       </div>
 
-      {!pl && <div className="empty-state">Seleccioná un barco y un puerto para ver el Cashflow.</div>}
+      {!pl && <div className="empty-state">No hay escenarios activos para este barco y puerto.</div>}
 
       {pl && (
         <>
-          <div className="kpis" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+          {/* KPIs */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
             {[
-              { label: "TIR", val: pl.tir !== null ? `${(pl.tir * 100).toFixed(1)}%` : "N/A", cls: pl.tir !== null && pl.tir > 0.12 ? "green" : pl.tir !== null ? "red" : "" },
-              { label: "VAN (12%)", val: fmtCompact(pl.van), cls: pl.van > 0 ? "green" : "red" },
-              { label: "MOIC", val: `${pl.moic.toFixed(2)}x`, cls: pl.moic > 1.5 ? "green" : "" },
-              { label: "CAPEX inicial", val: fmtCompact(pl.capexInicial), cls: "" },
+              { label:"CAPEX",     val: pl.capexInicial > 0 ? fmtCompact(pl.capexInicial) : "Sin inversión" },
+              { label:"TIR",       val: pl.tir != null ? `${(pl.tir*100).toFixed(1)}%` : "N/A", green: pl.tir > 0.12 },
+              { label:"VAN (12%)", val: pl.van != null ? fmtCompact(pl.van) : "N/A", green: pl.van > 0 },
+              { label:"MOIC",      val: pl.moic > 0 ? `${pl.moic.toFixed(2)}×` : "N/A", green: pl.moic > 1 },
             ].map(k => (
-              <div key={k.label} style={{flex:1,minWidth:90,background: k.cls === "green" ? "var(--green-bg)" : k.cls === "red" ? "var(--red-bg)" : "var(--bg)",border:`1px solid ${k.cls === "green" ? "var(--green-border)" : k.cls === "red" ? "var(--red-border)" : "var(--border)"}`,borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontSize:18,fontWeight:800,fontFamily:"var(--mono)",color: k.cls === "green" ? "var(--green)" : k.cls === "red" ? "var(--red)" : "var(--navy)"}}>{k.val}</div>
+              <div key={k.label} style={{flex:"1 1 100px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px"}}>
+                <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:800,color:k.green?"var(--green)":"var(--navy)"}}>{k.val}</div>
                 <div style={{fontSize:8,color:"var(--muted)",textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>{k.label}</div>
               </div>
             ))}
           </div>
 
-          <div className="card">
-            <div className="sec">Flujo de Caja — {barco.nombre} · {puerto.nombre}</div>
-            <div style={{overflowX:"auto"}}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{textAlign:"left",width:200}}>Concepto</th>
-                    <th style={{textAlign:"right",width:120}}>Año 0</th>
-                    {pl.anios.map(a => <th key={a.anio} style={{textAlign:"right"}}>{a.anio}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{fontWeight:700,fontSize:12}}>FCO — Flujo Operativo</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--muted)"}}>—</td>
-                    {pl.anios.map(a => (
-                      <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color: a.fco >= 0 ? "var(--green)" : "var(--red)"}}>
-                        {fmtUSD(a.fco)}
+          {/* Tabla Cashflow */}
+          <div style={{overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",tableLayout:"fixed",width:220+120*pl.anios.length,fontSize:11}}>
+              <colgroup>
+                <col style={{width:220}} />
+                {pl.anios.map((_,i) => <col key={i} style={{width:120}} />)}
+              </colgroup>
+              <thead>
+                <tr style={{background:"var(--navy)"}}>
+                  <th style={{padding:"8px 12px",textAlign:"left",color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>Concepto</th>
+                  {pl.anios.map(a => (
+                    <th key={a.anio} style={{padding:"8px 8px",textAlign:"right",color:"#fff",fontSize:11,fontWeight:700}}>{a.anio}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label:"Ingresos",          key:"ingresos",       green:true, sep:true },
+                  { label:"OPEX variable",      key:"opexVariable",   red:true },
+                  { label:"OPEX fijo",          key:"opexFijo",       red:true },
+                  { label:"Dry dock",           key:"costoDrydock",   red:true },
+                  { label:"EBITDA",             key:"ebitda",         bold:true, signed:true, sep:true },
+                  { label:"D&A",                key:"da",             red:true },
+                  { label:"Impuesto (35%)",     key:"impuesto",       red:true },
+                  { label:"RESULTADO NETO",     key:"resultadoNeto",  bold:true, signed:true, sep:true },
+                  { label:"+ D&A (no caja)",    key:"da" },
+                  { label:"FCO",                key:"fco",            bold:true, signed:true, sep:true },
+                  { label:"CAPEX inicial",      fmt:(_,i)=> i===0 ? fmtCompact(-pl.capexInicial) : "—", red:true },
+                  { label:"Valor residual",     key:"valorResidual",  green:true },
+                  { label:"FLUJO NETO",
+                    fmt:(a,i)=> fmtCompact(a.fco + a.valorResidual - (i===0?pl.capexInicial:0)),
+                    bold:true, signed:true, sep:true },
+                  { label:"Flujo acumulado",
+                    fmt:(_,i,rows)=>{
+                      const acum = rows.slice(0,i+1).reduce((s,r,j)=>
+                        s+r.fco+r.valorResidual-(j===0?pl.capexInicial:0), 0);
+                      return fmtCompact(acum);
+                    }, signed:true },
+                ].map((row, ri) => {
+                  const rowData = pl.anios.map((a, i) => row.fmt ? row.fmt(a, i, pl.anios) : a[row.key] ?? 0);
+                  return (
+                    <tr key={ri}
+                      onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={{padding:row.sep?"5px 12px":"3px 12px",fontWeight:row.bold?800:400,
+                        color:row.bold?"var(--navy)":"var(--muted)",fontSize:row.bold?11:10,
+                        borderTop:row.sep?"2px solid var(--border)":"none",whiteSpace:"nowrap"}}>
+                        {row.label}
                       </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td style={{fontWeight:500,fontSize:11,color:"var(--muted)"}}>Valor residual</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--muted)"}}>—</td>
-                    {pl.anios.map(a => (
-                      <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",fontSize:11,color:"var(--muted)"}}>
-                        {a.valorResidual > 0 ? fmtUSD(a.valorResidual) : "—"}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr style={{background:"var(--red-bg)"}}>
-                    <td style={{fontWeight:700,fontSize:12}}>FCI — Inversión</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,color:"var(--red)"}}>
-                      {fmtUSD(-pl.capexInicial)}
-                    </td>
-                    {pl.anios.map(a => (
-                      <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",color:"var(--muted)"}}>—</td>
-                    ))}
-                  </tr>
-                  <tr style={{background:"var(--bg)"}}>
-                    <td style={{fontWeight:800,fontSize:12}}>FLUJO NETO</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,color:"var(--red)"}}>
-                      {fmtUSD(-pl.capexInicial)}
-                    </td>
-                    {pl.anios.map(a => {
-                      const neto = a.fco + a.valorResidual;
-                      return (
-                        <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",fontWeight:800,color: neto >= 0 ? "var(--green)" : "var(--red)"}}>
-                          {fmtUSD(neto)}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr>
-                    <td style={{fontWeight:500,fontSize:11,color:"var(--muted)"}}>Saldo acumulado</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontSize:11,color:"var(--red)"}}>
-                      {fmtUSD(-pl.capexInicial)}
-                    </td>
-                    {pl.anios.map((a, i) => (
-                      <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",fontSize:11,color: saldosAcum[i] >= 0 ? "var(--green)" : "var(--red)"}}>
-                        {fmtUSD(saldosAcum[i])}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td style={{fontWeight:500,fontSize:11,color:"var(--muted)"}}>FCFE (para TIR/VAN)</td>
-                    <td style={{textAlign:"right",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,color:"var(--red)"}}>
-                      {fmtUSD(-pl.capexInicial)}
-                    </td>
-                    {pl.anios.map(a => (
-                      <td key={a.anio} style={{textAlign:"right",fontFamily:"var(--mono)",fontSize:11,fontWeight:700,color:"var(--navy)"}}>
-                        {fmtUSD(a.fco + a.valorResidual)}
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                      {rowData.map((val, i) => {
+                        const isNeg = typeof val === "string"
+                          ? val.startsWith("-")
+                          : typeof val === "number" && val < 0;
+                        const color = row.green ? "var(--green)"
+                                    : row.red   ? "var(--red)"
+                                    : row.signed ? (isNeg?"var(--red)":"var(--green)")
+                                    : "var(--navy)";
+                        return (
+                          <td key={i} style={{padding:row.sep?"5px 8px":"3px 8px",textAlign:"right",
+                            fontFamily:"var(--mono)",fontWeight:row.bold?800:400,color,
+                            borderTop:row.sep?"2px solid var(--border)":"none"}}>
+                            {typeof val === "number" ? fmtCompact(val) : val}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -1746,21 +1765,11 @@ function TabCashflow({ crecimientoPct = 0 }) {
   );
 }
 
-
-const METRICAS = [
-  { id: "tir",          label: "TIR",            fmt: v => v !== null ? `${(v * 100).toFixed(1)}%` : "N/A" },
-  { id: "van",          label: "VAN (12%)",       fmt: v => fmtCompact(v) },
-  { id: "moic",         label: "MOIC",            fmt: v => `${v.toFixed(2)}x` },
-  { id: "ebitda1",      label: "EBITDA año 1",    fmt: v => fmtCompact(v) },
-  { id: "resultadoNeto1", label: "Resultado neto año 1", fmt: v => fmtCompact(v) },
-  { id: "margenEbitda1",  label: "Margen EBITDA",  fmt: v => `${(v * 100).toFixed(1)}%` },
-];
-
 function TabComparacion({ crecimientoPct = 0 }) {
   const [barcos, setBarcos]       = useState([]);
   const [puertos, setPuertos]     = useState([]);
-  const [servicios, setServicios] = useState([]);
-  const [consumosPorBarco, setConsumosPorBarco]     = useState({});
+  const [escenarios, setEscenarios] = useState([]);
+  const [consumosPorBarco, setConsumosPorBarco]       = useState({});
   const [tripulacionPorBarco, setTripulacionPorBarco] = useState({});
   const [loading, setLoading]     = useState(true);
   const [msg, setMsg]             = useState(null);
@@ -1771,23 +1780,19 @@ function TabComparacion({ crecimientoPct = 0 }) {
     (async () => {
       setLoading(true);
       try {
-        const [rb, rp, rs] = await Promise.all([
+        const [rb, rp, re] = await Promise.all([
           supabase.from(TABLE_BARCOS).select("*").order("created_at"),
           supabase.from(TABLE_PUERTOS).select("*").order("orden"),
-          supabase.from(TABLE_SERVICIOS).select("*").order("orden"),
+          supabase.from(TABLE_ESCENARIOS_SERVICIO).select("*"),
         ]);
-        if (rb.error) throw rb.error;
-        if (rp.error) throw rp.error;
-        if (rs.error) throw rs.error;
+        if (rb.error||rp.error||re.error) throw rb.error||rp.error||re.error;
 
         const barcosData = rb.data || [];
         setBarcos(barcosData);
         setPuertos(rp.data || []);
-        setServicios(rs.data || []);
+        setEscenarios(re.data || []);
 
-        // Cargar consumos y tripulación de todos los barcos
-        const consumosMap = {};
-        const tripMap = {};
+        const consumosMap = {}, tripMap = {};
         await Promise.all(barcosData.map(async (b) => {
           const [rc, rt] = await Promise.all([
             supabase.from(TABLE_CONSUMOS).select("*").eq("barco_id", b.id).order("orden"),
@@ -1799,7 +1804,7 @@ function TabComparacion({ crecimientoPct = 0 }) {
         setConsumosPorBarco(consumosMap);
         setTripulacionPorBarco(tripMap);
       } catch (e) {
-        setMsg({ type: "err", text: `Error al cargar datos: ${e.message}` });
+        setMsg({ type: "err", text: `Error: ${e.message}` });
       } finally {
         setLoading(false);
       }
@@ -1812,9 +1817,7 @@ function TabComparacion({ crecimientoPct = 0 }) {
   const combinaciones = [];
   for (const barco of barcos) {
     for (const puerto of puertos) {
-      const consumos   = consumosPorBarco[barco.id] || [];
-      const tripulacion = tripulacionPorBarco[barco.id] || [];
-      const pl = calcularPL(barco, puerto, servicios, consumos, tripulacion, maxAnios, crecimientoPct);
+      const pl = calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorBarco, maxAnios);
       if (!pl) continue;
       combinaciones.push({
         barco,
@@ -2198,6 +2201,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         carga_ida:            e.carga_ida,
         carga_vuelta:         e.carga_vuelta,
         camiones_cantidad:    e.camiones_cantidad,
+        market_share_0:       e.market_share_0,
+        tasa_crecimiento:     e.tasa_crecimiento,
         viveres_activo:       e.viveres_activo,
         costo_despacho_zarpe: e.costo_despacho_zarpe,
         costo_despacho_arribo: e.costo_despacho_arribo,
@@ -2263,6 +2268,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           entregas_por_viaje: 1,
           carga_ida: "lastre", carga_vuelta: "lastre",
           camiones_cantidad: 0,
+          market_share_0: 30,
+          tasa_crecimiento: 5,
           viveres_activo: false,
           costo_despacho_zarpe:  puerto?.costo_despacho_zarpe  || puerto?.costo_despacho_operacion || 0,
           costo_despacho_arribo: puerto?.costo_despacho_arribo || puerto?.costo_despacho_operacion || 0,
@@ -2415,6 +2422,15 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         <input className="field-input" type="number" min="0" value={e.operaciones_anio??0}
           onChange={ev => setField(key,"operaciones_anio",parseNum(ev.target.value))} />
     )},
+    { label: "Market share año 0 (%)", render: (e, key) => (
+        <input className="field-input" type="number" min="0" max="100" step="1" value={e.market_share_0??30}
+          onChange={ev => setField(key,"market_share_0",parseNum(ev.target.value))} />
+    )},
+    { label: "Crecimiento anual (%)", render: (e, key) => (
+        <input className="field-input" type="number" min="0" step="0.5" value={e.tasa_crecimiento??5}
+          onChange={ev => setField(key,"tasa_crecimiento",parseNum(ev.target.value))} />
+    )},
+    { label: "Ops. capturadas año 1", calc: (d, e) => e ? `${fmtDec((e.operaciones_anio||0)*(e.market_share_0||0)/100, 1)} ops` : "—" },
     ...((isAgua||isSlop) ? [
       { label: "Carga ida", render: (e, key) => (
           <select className="field-input" value={e.carga_ida||"lastre"} onChange={ev => setField(key,"carga_ida",ev.target.value)}>
@@ -2961,7 +2977,6 @@ export default function App() {
   const [session, setSession]   = useState(null);
   const [loading, setLoading]   = useState(true);
   const [tab, setTab]           = useState("barcos");
-  const [crecimientoPct, setCrecimientoPct] = useState(4);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -3000,9 +3015,9 @@ export default function App() {
         {tab === "agua"        && <TabServicio tipoServicio="agua"        titulo="Entrega de Agua"    icono="💧" />}
         {tab === "slop"        && <TabServicio tipoServicio="slop"        titulo="Transporte de Slop" icono="🛢️" />}
         {tab === "lubricantes" && <TabServicio tipoServicio="lubricantes" titulo="Lubricantes"        icono="🔧" />}
-        {tab === "pl"          && <TabPL crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
-        {tab === "cashflow"    && <TabCashflow crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
-        {tab === "comparacion" && <TabComparacion crecimientoPct={crecimientoPct} onCrecimientoChange={setCrecimientoPct} />}
+        {tab === "pl"          && <TabPL />}
+        {tab === "cashflow"    && <TabCashflow />}
+        {tab === "comparacion" && <TabComparacion />}
       </div>
     </>
   );
