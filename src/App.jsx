@@ -1256,11 +1256,16 @@ function calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorB
       const tc      = (esc.tasa_crecimiento || 0) / 100;
       const mercado = esc.operaciones_anio  || 0;
       const entregas = esc.entregas_por_viaje || 1;
+      const alijes   = esc.alijes_por_viaje   || 1;
       const esAgua  = esc.tipo_servicio === "agua";
       const esSlop  = esc.tipo_servicio === "slop";
+      const esAlije = esc.tipo_servicio === "alije";
 
+      // Convertir ops/entregas capturadas → viajes físicos
       const viajesCapturados = (esAgua || esSlop)
         ? (mercado * ms0 * Math.pow(1 + tc, anio - 1)) / entregas
+        : esAlije
+        ? (mercado * ms0 * Math.pow(1 + tc, anio - 1)) / alijes
         :  mercado * ms0 * Math.pow(1 + tc, anio - 1);
 
       if (viajesCapturados <= 0) continue;
@@ -1271,7 +1276,8 @@ function calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorB
       const diasAlist  = (esc.hs_alistamiento || 12) / 24;
       const diasDesarm = (esc.hs_desarmado    || 4)  / 24;
       const diasNavIda = velCrucero > 0 ? (dist / velCrucero) / 24 : 0;
-      const diasSitio  = esc.dias_operacion || 1;
+      // Días en sitio = días por op × unidades por viaje
+      const diasSitio  = (esc.dias_operacion || 1) * (esAlije ? alijes : (esAgua||esSlop) ? 1 : 1);
       const diasViaje  = diasAlist + diasNavIda + diasSitio + diasNavIda + diasDesarm;
       const diasEmb    = Math.ceil(diasViaje);
       diasOperativos  += viajesCapturados * diasViaje;
@@ -1297,8 +1303,8 @@ function calcularPL(barco, puerto, escenarios, consumosPorBarco, tripulacionPorB
       const slopV = esSlop ? (esc.camiones_cantidad||0)*(puerto.costo_camion_unitario||0) + m3Tot*(puerto.costo_disposicion_m3||0) : 0;
 
       let ingrV = 0;
-      if (esc.tipo_servicio === "alije")       ingrV = (esc.mob_demob_usd||0) + diasSitio*(esc.tarifa_dia_operando||0);
-      else if (esAgua || esSlop)               ingrV = (esAgua?(esc.m3_agua||0):(esc.m3_slop||0))*entregas*(esc.precio_unitario||0);
+      if (esAlije)                         ingrV = alijes * ((esc.mob_demob_usd||0) + (esc.dias_operacion||1)*(esc.tarifa_dia_operando||0));
+      else if (esAgua || esSlop)           ingrV = (esAgua?(esc.m3_agua||0):(esc.m3_slop||0))*entregas*(esc.precio_unitario||0);
       else if (esc.tipo_servicio === "lubricantes") ingrV = (esc.drums_lubricante||0)*(esc.precio_unitario||0);
 
       ingresos            += viajesCapturados * ingrV;
@@ -1381,7 +1387,6 @@ function calcVAN(flujos, tasa) {
 }
 
 // ─── TAB P&L ───────────────────────────────────────────────────────────────
-// ─── TAB P&L ───────────────────────────────────────────────────────────────
 function TabPL({ crecimientoPct = 0, onCrecimientoChange }) {
   const [barcos, setBarcos]                       = useState([]);
   const [puertos, setPuertos]                     = useState([]);
@@ -1392,6 +1397,7 @@ function TabPL({ crecimientoPct = 0, onCrecimientoChange }) {
   const [puertoId, setPuertoId]                   = useState("");
   const [anios, setAnios]                         = useState(7);
   const [loading, setLoading]                     = useState(true);
+  const [shareOverrides, setShareOverrides]       = useState({});
   const [msg, setMsg]                             = useState(null);
 
   useEffect(() => {
@@ -1474,124 +1480,213 @@ function TabPL({ crecimientoPct = 0, onCrecimientoChange }) {
 
       {!pl && <div className="empty-state">No hay escenarios activos para este barco y puerto. Configuralos en las tabs de servicio.</div>}
 
-      {pl && (
-        <>
-          {/* KPIs */}
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-            {[
-              { label:"CAPEX",    val: pl.capexInicial > 0 ? fmtCompact(pl.capexInicial) : "Sin inversión" },
-              { label:"TIR",      val: pl.tir != null ? fmtPct(pl.tir) : "N/A", green: pl.tir > 0.12 },
-              { label:"VAN (12%)",val: pl.van != null ? fmtCompact(pl.van) : "N/A", green: pl.van > 0 },
-              { label:"MOIC",     val: pl.moic > 0 ? `${pl.moic.toFixed(2)}×` : "N/A", green: pl.moic > 1 },
-            ].map(k => (
-              <div key={k.label} style={{flex:"1 1 100px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px"}}>
-                <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:800,color: k.green ? "var(--green)" : "var(--navy)"}}>{k.val}</div>
-                <div style={{fontSize:8,color:"var(--muted)",textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>{k.label}</div>
-              </div>
-            ))}
-          </div>
+      {pl && (() => {
+        // Escenarios activos para este par
+        const escsActivos = escenarios.filter(e => e.barco_id === barcoId && e.puerto_id === puertoId);
+        const TIPO_ICON = { alije:"⚓", agua:"💧", slop:"🛢️", lubricantes:"🔧" };
+        const ZONA_SHORT = { zona_comun:"Común", zona_alfa:"Alfa", zona_delta:"Delta" };
 
-          {/* Tabla P&L */}
-          <div style={{overflowX:"auto"}}>
-            <table style={{borderCollapse:"collapse",tableLayout:"fixed",
-              width: 220 + 120 * pl.anios.length, fontSize:11}}>
-              <colgroup>
-                <col style={{width:220}} />
-                {pl.anios.map((_, i) => <col key={i} style={{width:120}} />)}
-              </colgroup>
-              <thead>
-                <tr style={{background:"var(--navy)"}}>
-                  <th style={{padding:"8px 12px",textAlign:"left",color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>Concepto</th>
-                  {pl.anios.map(a => (
-                    <th key={a.anio} style={{padding:"8px 8px",textAlign:"right",color:"#fff",fontSize:11,fontWeight:700}}>{a.anio}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {/* Detalle por servicio */}
-                {(() => {
-                  const tipos = [...new Set(pl.anios.flatMap(a => a.detalleServicios.map(d => `${d.tipo}_${d.zona}`)))];
-                  return tipos.length > 0 ? <>
-                    <tr><td colSpan={1+pl.anios.length} style={{padding:"4px 12px",background:"#EEF2F7",fontSize:8,fontWeight:800,color:"var(--blue)",textTransform:"uppercase",letterSpacing:1.5,borderTop:"2px solid var(--border)"}}>Ingresos por servicio</td></tr>
-                    {tipos.map(tk => {
-                      const [tipo, zona] = tk.split("_").reduce((a,v,i,arr) => i===0?[v,""]:[a[0],a[1]+(i>1?"_":"")+v], ["",""]);
+        // Helper para leer override o default del escenario
+        const getShare = (esc) => shareOverrides[esc.id] || { ms0: esc.market_share_0??30, tc: esc.tasa_crecimiento??5 };
+        const setShare = (escId, field, val) => setShareOverrides(prev => ({
+          ...prev,
+          [escId]: { ...(prev[escId] || {}), [field]: val }
+        }));
+
+        // Recalcular PL con los overrides aplicados
+        const escsConOverride = escenarios.map(e => {
+          const ov = shareOverrides[e.id];
+          if (!ov) return e;
+          return { ...e, market_share_0: ov.ms0, tasa_crecimiento: ov.tc };
+        });
+        const plFinal = calcularPL(barco, puerto, escsConOverride, consumosPorBarco, tripulacionPorBarco, anios);
+        if (!plFinal) return null;
+
+        const fmtPct = (v) => v != null ? `${(v*100).toFixed(1)}%` : "N/A";
+
+        return (
+          <>
+            {/* Market share por escenario */}
+            <div className="card" style={{marginBottom:12}}>
+              <div className="sec">Participación de mercado por operación</div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+                  <thead>
+                    <tr style={{background:"var(--bg)"}}>
+                      {["Operación","Mercado total","Share año 0 (%)","Crecim. anual (%)","Ops capturadas año 1","Ingreso año 1 (est.)"].map(h => (
+                        <th key={h} style={{padding:"6px 10px",textAlign:"right",fontSize:8,fontWeight:700,
+                          color:"var(--muted)",textTransform:"uppercase",letterSpacing:.5,
+                          borderBottom:"2px solid var(--border)",whiteSpace:"nowrap",
+                          ...(h==="Operación"?{textAlign:"left"}:{})}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {escsActivos.map(esc => {
+                      const { ms0, tc } = getShare(esc);
+                      const entregas = esc.entregas_por_viaje || 1;
+                      const esAgua = esc.tipo_servicio === "agua";
+                      const esAlije = esc.tipo_servicio === "alije";
+                      const esSlop = esc.tipo_servicio === "slop";
+                      const alijes   = esc.alijes_por_viaje   || 1;
+                      const mercado = esc.operaciones_anio || 0;
+                      const viajes1 = (esAgua||esSlop) ? (mercado*ms0/100)/entregas
+                                    : esAlije          ? (mercado*ms0/100)/alijes
+                                    :                    (mercado*ms0/100);
+
+                      let ingrEst = 0;
+                      if (esAlije)      ingrEst = viajes1 * alijes * ((esc.mob_demob_usd||0)+(esc.dias_operacion||1)*(esc.tarifa_dia_operando||0));
+                      else if (esAgua)  ingrEst = viajes1 * (esc.m3_agua||0)*entregas*(esc.precio_unitario||0);
+                      else if (esSlop)  ingrEst = viajes1 * (esc.m3_slop||0)*entregas*(esc.precio_unitario||0);
+                      else              ingrEst = viajes1 * (esc.drums_lubricante||0)*(esc.precio_unitario||0);
+
                       return (
-                        <tr key={tk} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                          <td style={{padding:"4px 12px 4px 20px",color:"var(--muted)",fontSize:10,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                            {TIPO_LABEL[tipo]||tipo} · {ZONA_LABEL_SHORT[zona]||zona}
+                        <tr key={esc.id} style={{borderBottom:"1px solid #F0F4F8"}}
+                          onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <td style={{padding:"6px 10px",fontWeight:600,color:"var(--navy)",whiteSpace:"nowrap"}}>
+                            {TIPO_ICON[esc.tipo_servicio]} {esc.tipo_servicio.charAt(0).toUpperCase()+esc.tipo_servicio.slice(1)} · {ZONA_SHORT[esc.zona]||esc.zona}
                           </td>
-                          {pl.anios.map(a => {
-                            const d = a.detalleServicios.find(x => `${x.tipo}_${x.zona}` === tk);
-                            return <td key={a.anio} style={{padding:"4px 8px",textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{d ? fmtCompact(d.ingreso) : "—"}</td>;
-                          })}
+                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"var(--mono)",color:"var(--muted)"}}>
+                            {mercado} {(esAgua||esSlop)?"entregas":"ops"}
+                          </td>
+                          <td style={{padding:"4px 6px",textAlign:"right"}}>
+                            <input type="number" min="0" max="100" step="1"
+                              className="field-input" style={{width:70,textAlign:"right"}}
+                              value={ms0}
+                              onChange={ev => setShare(esc.id, "ms0", parseNum(ev.target.value))} />
+                          </td>
+                          <td style={{padding:"4px 6px",textAlign:"right"}}>
+                            <input type="number" min="0" step="0.5"
+                              className="field-input" style={{width:70,textAlign:"right"}}
+                              value={tc}
+                              onChange={ev => setShare(esc.id, "tc", parseNum(ev.target.value))} />
+                          </td>
+                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"var(--mono)",fontWeight:700,color:"var(--navy)"}}>
+                            {fmtDec(viajes1,1)} {(esAgua||esSlop)?"viajes":"ops"}
+                          </td>
+                          <td style={{padding:"6px 10px",textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)",fontWeight:700}}>
+                            {fmtCompact(ingrEst)}
+                          </td>
                         </tr>
                       );
                     })}
-                  </> : null;
-                })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-                {[
-                  { label:"INGRESOS TOTALES",     key:"ingresos",            bold:true, green:true, sep:true },
-                  { label:"Combustible",           key:"costosCombustible",   red:true },
-                  { label:"Lubricante",            key:"costosLubricante",    red:true },
-                  { label:"Tripulación",           key:"costosTripulacion",   red:true },
-                  { label:"Víveres",               key:"costosViveres",       red:true },
-                  { label:"Costos portuarios",     key:"costosPortuarios",    red:true },
-                  { label:"Costo de producto",     key:"costosProducto",      red:true },
-                  { label:"Logística slop",        key:"costosSlopLogistica", red:true },
-                  { label:"OPEX VARIABLE",         key:"opexVariable",        bold:true, red:true, sep:true },
-                  { label:"OPEX fijo",             key:"opexFijo",            red:true },
-                  { label:"Dry dock",              key:"costoDrydock",        red:true },
-                  { label:"OPEX TOTAL",            key:"opexTotal",           bold:true, red:true, sep:true },
-                  { label:"EBITDA",                key:"ebitda",              bold:true, sep:true, signed:true },
-                  { label:"Margen EBITDA",         fmt:(a)=>fmtPct(a.margenEbitda), sep:false },
-                  { label:"D&A",                   key:"da",                  red:true },
-                  { label:"EBIT",                  key:"ebit",                bold:true, signed:true },
-                  { label:"Impuesto (35%)",        key:"impuesto",            red:true },
-                  { label:"RESULTADO NETO",        key:"resultadoNeto",       bold:true, sep:true, signed:true },
-                  { label:"+ D&A (no caja)",       key:"da",                  },
-                  { label:"FCO",                   key:"fco",                 bold:true, signed:true, sep:true },
-                  { label:"Valor residual",        key:"valorResidual",       green:true },
-                  { label:"Días operativos",       fmt:(a)=>`${a.diasOperativos}d` },
-                  { label:"Días idle",             fmt:(a)=>`${a.diasIdle}d` },
-                  { label:"Días dry dock",         fmt:(a)=>a.diasDrydock>0?`${a.diasDrydock}d`:"—" },
-                ].map((row, ri) => (
-                  <tr key={ri}
-                    onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"}
-                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                    <td style={{
-                      padding: row.sep ? "5px 12px" : "3px 12px",
-                      fontWeight: row.bold ? 800 : 400,
-                      color: row.bold ? "var(--navy)" : "var(--muted)",
-                      fontSize: row.bold ? 11 : 10,
-                      borderTop: row.sep ? "2px solid var(--border)" : "none",
-                      whiteSpace:"nowrap",
-                    }}>{row.label}</td>
-                    {pl.anios.map(a => {
-                      const val = row.fmt ? row.fmt(a) : row.key ? a[row.key] : null;
-                      const isNeg = typeof val === "number" && val < 0;
-                      const color = row.green ? "var(--green)"
-                                  : row.red   ? "var(--red)"
-                                  : row.signed ? (isNeg ? "var(--red)" : "var(--green)")
-                                  : "var(--navy)";
-                      return (
-                        <td key={a.anio} style={{
-                          padding: row.sep ? "5px 8px" : "3px 8px",
-                          textAlign:"right",fontFamily:"var(--mono)",
-                          fontWeight: row.bold ? 800 : 400,
-                          color, borderTop: row.sep ? "2px solid var(--border)" : "none",
-                        }}>
-                          {typeof val === "number" ? fmtCompact(val) : val ?? "—"}
-                        </td>
-                      );
-                    })}
+            {/* KPIs */}
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              {[
+                { label:"CAPEX",    val: plFinal.capexInicial > 0 ? fmtCompact(plFinal.capexInicial) : "Sin inversión" },
+                { label:"TIR",      val: plFinal.tir != null ? `${(plFinal.tir*100).toFixed(1)}%` : "N/A", green: plFinal.tir > 0.12 },
+                { label:"VAN (12%)",val: plFinal.van != null ? fmtCompact(plFinal.van) : "N/A", green: plFinal.van > 0 },
+                { label:"MOIC",     val: plFinal.moic > 0 ? `${plFinal.moic.toFixed(2)}×` : "N/A", green: plFinal.moic > 1 },
+              ].map(k => (
+                <div key={k.label} style={{flex:"1 1 100px",background:"var(--bg)",border:"1px solid var(--border)",borderRadius:8,padding:"10px 14px"}}>
+                  <div style={{fontFamily:"var(--mono)",fontSize:16,fontWeight:800,color:k.green?"var(--green)":"var(--navy)"}}>{k.val}</div>
+                  <div style={{fontSize:8,color:"var(--muted)",textTransform:"uppercase",letterSpacing:.5,marginTop:2}}>{k.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tabla P&L */}
+            <div style={{overflowX:"auto"}}>
+              <table style={{borderCollapse:"collapse",tableLayout:"fixed",
+                width: 220 + 120 * plFinal.anios.length, fontSize:11}}>
+                <colgroup>
+                  <col style={{width:220}} />
+                  {plFinal.anios.map((_, i) => <col key={i} style={{width:120}} />)}
+                </colgroup>
+                <thead>
+                  <tr style={{background:"var(--navy)"}}>
+                    <th style={{padding:"8px 12px",textAlign:"left",color:"rgba(255,255,255,.7)",fontSize:8,textTransform:"uppercase",letterSpacing:1}}>Concepto</th>
+                    {plFinal.anios.map(a => (
+                      <th key={a.anio} style={{padding:"8px 8px",textAlign:"right",color:"#fff",fontSize:11,fontWeight:700}}>{a.anio}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+                </thead>
+                <tbody>
+                  {/* Detalle por servicio */}
+                  {(() => {
+                    const tipos = [...new Set(plFinal.anios.flatMap(a => a.detalleServicios.map(d => `${d.tipo}_${d.zona}`)))];
+                    return tipos.length > 0 ? <>
+                      <tr><td colSpan={1+plFinal.anios.length} style={{padding:"4px 12px",background:"#EEF2F7",fontSize:8,fontWeight:800,color:"var(--blue)",textTransform:"uppercase",letterSpacing:1.5,borderTop:"2px solid var(--border)"}}>Ingresos por servicio</td></tr>
+                      {tipos.map(tk => {
+                        const [tipo, ...zonaParts] = tk.split("_");
+                        const zona = zonaParts.join("_");
+                        const TIPO_LABEL = { alije:"Alije", agua:"Agua", slop:"Slop", lubricantes:"Lubricantes" };
+                        const ZONA_SHORT = { zona_comun:"Común", zona_alfa:"Alfa", zona_delta:"Delta" };
+                        return (
+                          <tr key={tk} onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <td style={{padding:"4px 12px 4px 20px",color:"var(--muted)",fontSize:10,whiteSpace:"nowrap"}}>
+                              {TIPO_LABEL[tipo]||tipo} · {ZONA_SHORT[zona]||zona}
+                            </td>
+                            {plFinal.anios.map(a => {
+                              const d = a.detalleServicios.find(x => `${x.tipo}_${x.zona}` === tk);
+                              return <td key={a.anio} style={{padding:"4px 8px",textAlign:"right",fontFamily:"var(--mono)",color:"var(--green)"}}>{d ? fmtCompact(d.ingreso) : "—"}</td>;
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </> : null;
+                  })()}
+
+                  {[
+                    { label:"INGRESOS TOTALES",     key:"ingresos",            bold:true, green:true, sep:true },
+                    { label:"Combustible",           key:"costosCombustible",   red:true },
+                    { label:"Lubricante",            key:"costosLubricante",    red:true },
+                    { label:"Tripulación",           key:"costosTripulacion",   red:true },
+                    { label:"Víveres",               key:"costosViveres",       red:true },
+                    { label:"Costos portuarios",     key:"costosPortuarios",    red:true },
+                    { label:"Costo de producto",     key:"costosProducto",      red:true },
+                    { label:"Logística slop",        key:"costosSlopLogistica", red:true },
+                    { label:"OPEX VARIABLE",         key:"opexVariable",        bold:true, red:true, sep:true },
+                    { label:"OPEX fijo",             key:"opexFijo",            red:true },
+                    { label:"Dry dock",              key:"costoDrydock",        red:true },
+                    { label:"OPEX TOTAL",            key:"opexTotal",           bold:true, red:true, sep:true },
+                    { label:"EBITDA",                key:"ebitda",              bold:true, sep:true, signed:true },
+                    { label:"Margen EBITDA",         fmt:(a)=>`${(a.margenEbitda*100).toFixed(1)}%` },
+                    { label:"D&A",                   key:"da",                  red:true },
+                    { label:"EBIT",                  key:"ebit",                bold:true, signed:true },
+                    { label:"Impuesto (35%)",        key:"impuesto",            red:true },
+                    { label:"RESULTADO NETO",        key:"resultadoNeto",       bold:true, sep:true, signed:true },
+                    { label:"+ D&A (no caja)",       key:"da" },
+                    { label:"FCO",                   key:"fco",                 bold:true, signed:true, sep:true },
+                    { label:"Valor residual",        key:"valorResidual",       green:true },
+                    { label:"Días operativos",       fmt:(a)=>`${a.diasOperativos}d` },
+                    { label:"Días idle",             fmt:(a)=>`${a.diasIdle}d` },
+                    { label:"Días dry dock",         fmt:(a)=>a.diasDrydock>0?`${a.diasDrydock}d`:"—" },
+                  ].map((row, ri) => (
+                    <tr key={ri}
+                      onMouseEnter={e=>e.currentTarget.style.background="#F9FAFB"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={{padding:row.sep?"5px 12px":"3px 12px",fontWeight:row.bold?800:400,
+                        color:row.bold?"var(--navy)":"var(--muted)",fontSize:row.bold?11:10,
+                        borderTop:row.sep?"2px solid var(--border)":"none",whiteSpace:"nowrap"}}>
+                        {row.label}
+                      </td>
+                      {plFinal.anios.map(a => {
+                        const val = row.fmt ? row.fmt(a) : row.key ? a[row.key] : null;
+                        const isNeg = typeof val === "number" && val < 0;
+                        const color = row.green?"var(--green)":row.red?"var(--red)":row.signed?(isNeg?"var(--red)":"var(--green)"):"var(--navy)";
+                        return (
+                          <td key={a.anio} style={{padding:row.sep?"5px 8px":"3px 8px",textAlign:"right",
+                            fontFamily:"var(--mono)",fontWeight:row.bold?800:400,color,
+                            borderTop:row.sep?"2px solid var(--border)":"none"}}>
+                            {typeof val === "number" ? fmtCompact(val) : val ?? "—"}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }
@@ -2203,6 +2298,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         camiones_cantidad:    e.camiones_cantidad,
         market_share_0:       e.market_share_0,
         tasa_crecimiento:     e.tasa_crecimiento,
+        alijes_por_viaje:     e.alijes_por_viaje,
         viveres_activo:       e.viveres_activo,
         costo_despacho_zarpe: e.costo_despacho_zarpe,
         costo_despacho_arribo: e.costo_despacho_arribo,
@@ -2268,8 +2364,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           entregas_por_viaje: 1,
           carga_ida: "lastre", carga_vuelta: "lastre",
           camiones_cantidad: 0,
-          market_share_0: 30,
-          tasa_crecimiento: 5,
+          market_share_0: 30, tasa_crecimiento: 5,
+          alijes_por_viaje: 1,
           viveres_activo: false,
           costo_despacho_zarpe:  puerto?.costo_despacho_zarpe  || puerto?.costo_despacho_operacion || 0,
           costo_despacho_arribo: puerto?.costo_despacho_arribo || puerto?.costo_despacho_operacion || 0,
@@ -2308,15 +2404,22 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const costoDiaTripPto = tripulacion.reduce((s,r) => s+(r.cantidad_puerto||0)*(r.costo_dia_puerto||0), 0);
 
     const velCrucero = barco.velocidad_crucero || 8;
-    const dist = esc.zona === "zona_comun" ? (puerto.dist_zona_comun||0)
-               : esc.zona === "zona_alfa"  ? (puerto.dist_zona_alfa||0)
-               : (puerto.dist_zona_delta||0);
+    const dist      = esc.zona === "zona_comun" ? (puerto.dist_zona_comun||0)
+                    : esc.zona === "zona_alfa"  ? (puerto.dist_zona_alfa||0)
+                    : (puerto.dist_zona_delta||0);
+
+    // Unidades por viaje según tipo de servicio
+    const isAlije_ = tipoServicio === "alije";
+    const unidadesPorViaje = isAlije_
+      ? (esc.alijes_por_viaje || 1)
+      : (esc.entregas_por_viaje || 1);
 
     const diasAlist  = (esc.hs_alistamiento||0)/24;
     const diasDesarm = (esc.hs_desarmado||4)/24;
     const diasNavIda = velCrucero > 0 ? (dist/velCrucero)/24 : 0;
     const diasNavVta = diasNavIda;
-    const diasSitio  = esc.dias_operacion || 0;
+    // Días en sitio = días por operación × unidades por viaje
+    const diasSitio  = (esc.dias_operacion||1) * unidadesPorViaje;
     const diasTotalFrac = diasAlist + diasNavIda + diasSitio + diasNavVta + diasDesarm;
     const diasEmb    = Math.ceil(diasTotalFrac);
 
@@ -2378,15 +2481,17 @@ function TabServicio({ tipoServicio, titulo, icono }) {
 
     // Ingreso según tipo de servicio
     const entregas = esc.entregas_por_viaje || 1;
+    const alijes   = esc.alijes_por_viaje   || 1;
     const ingresoProducto = tipoServicio === "agua"        ? (esc.m3_agua||0)          * entregas * (esc.precio_unitario||0)
                           : tipoServicio === "slop"        ? (esc.m3_slop||0)          * entregas * (esc.precio_unitario||0)
                           : tipoServicio === "lubricantes" ? (esc.drums_lubricante||0)             * (esc.precio_unitario||0)
                           : 0;
+    // Alije: mob/demob + días en sitio × tarifa, por cada alije del viaje
     const ingresoMD    = tipoServicio === "alije"
-      ? (esc.mob_demob_usd||0) + diasSitio*(esc.tarifa_dia_operando||0)
+      ? alijes * ((esc.mob_demob_usd||0) + (esc.dias_operacion||1) * (esc.tarifa_dia_operando||0))
       : ingresoProducto;
     const ingresoZarpe = tipoServicio === "alije"
-      ? diasTotalFrac*(esc.tarifa_dia_navegando||0)
+      ? diasTotalFrac * (esc.tarifa_dia_navegando||0)
       : ingresoProducto;
 
     return {
@@ -2422,15 +2527,6 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         <input className="field-input" type="number" min="0" value={e.operaciones_anio??0}
           onChange={ev => setField(key,"operaciones_anio",parseNum(ev.target.value))} />
     )},
-    { label: "Market share año 0 (%)", render: (e, key) => (
-        <input className="field-input" type="number" min="0" max="100" step="1" value={e.market_share_0??30}
-          onChange={ev => setField(key,"market_share_0",parseNum(ev.target.value))} />
-    )},
-    { label: "Crecimiento anual (%)", render: (e, key) => (
-        <input className="field-input" type="number" min="0" step="0.5" value={e.tasa_crecimiento??5}
-          onChange={ev => setField(key,"tasa_crecimiento",parseNum(ev.target.value))} />
-    )},
-    { label: "Ops. capturadas año 1", calc: (d, e) => e ? `${fmtDec((e.operaciones_anio||0)*(e.market_share_0||0)/100, 1)} ops` : "—" },
     ...((isAgua||isSlop) ? [
       { label: "Carga ida", render: (e, key) => (
           <select className="field-input" value={e.carga_ida||"lastre"} onChange={ev => setField(key,"carga_ida",ev.target.value)}>
@@ -2447,6 +2543,15 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     ] : []),
     ...(isAlije ? [
       { sec: "② Mob/Demob + día op." },
+      { label: "Alijes por viaje", render: (e, key) => (
+          <input className="field-input" type="number" min="1" step="0.5" value={e.alijes_por_viaje??1}
+            onChange={ev => setField(key,"alijes_por_viaje",parseNum(ev.target.value))} />
+      )},
+      { label: "Días sitio por alije", render: (e, key) => (
+          <input className="field-input" type="number" min="0" step="0.5" value={e.dias_operacion??1}
+            onChange={ev => setField(key,"dias_operacion",parseNum(ev.target.value))} />
+      )},
+      { label: "Días sitio total",  calc: (d, e) => e ? `${fmtDec((e.dias_operacion||1)*(e.alijes_por_viaje||1),1)}d` : "—" },
       { label: "Mob/Demob (USD/op)", render: (e, key) => (
           <input className="field-input" type="number" min="0" value={e.mob_demob_usd??0}
             onChange={ev => setField(key,"mob_demob_usd",parseNum(ev.target.value))} />
