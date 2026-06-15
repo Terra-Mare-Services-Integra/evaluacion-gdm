@@ -844,6 +844,8 @@ const PUERTO_DEFAULT = {
   costo_despacho_zarpe: 0,
   costo_despacho_arribo: 0,
   viveres_dia_persona: 0,
+  costo_camion_unitario: 0,
+  costo_disposicion_m3: 0,
   precio_vlsfo: 1000,
   precio_lubricante: 2200,
   dist_zona_comun: 0,
@@ -918,6 +920,8 @@ function TabPuertos() {
         costo_despacho_zarpe: puerto.costo_despacho_zarpe,
         costo_despacho_arribo: puerto.costo_despacho_arribo,
         viveres_dia_persona: puerto.viveres_dia_persona,
+        costo_camion_unitario: puerto.costo_camion_unitario,
+        costo_disposicion_m3: puerto.costo_disposicion_m3,
         precio_vlsfo: puerto.precio_vlsfo,
         precio_lubricante: puerto.precio_lubricante,
         dist_zona_comun: puerto.dist_zona_comun,
@@ -1037,6 +1041,13 @@ function TabPuertos() {
     )},
     { label: "Víveres / día / persona (USD)", render: (p, i) => (
         <input className="field-input" type="number" value={p.viveres_dia_persona??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,viveres_dia_persona:parseNum(e.target.value)}:x)); }} />
+    )},
+    { sec: "⑦ Logística slop (USD)",         items: null },
+    { label: "Camión isotanque (USD/unidad)", render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_camion_unitario??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_camion_unitario:parseNum(e.target.value)}:x)); }} />
+    )},
+    { label: "Disposición final (USD/m³)",   render: (p, i) => (
+        <input className="field-input" type="number" value={p.costo_disposicion_m3??0} onChange={e => { setPuertos(prev => prev.map((x,j)=>j===i?{...x,costo_disposicion_m3:parseNum(e.target.value)}:x)); }} />
     )},
     { sec: "⑤ Costos indirectos",            items: null },
     { label: "Lump sum mensual (USD)",       render: (p, i) => (
@@ -2184,6 +2195,9 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         m3_slop:              e.m3_slop,
         drums_lubricante:     e.drums_lubricante,
         entregas_por_viaje:   e.entregas_por_viaje,
+        carga_ida:            e.carga_ida,
+        carga_vuelta:         e.carga_vuelta,
+        camiones_cantidad:    e.camiones_cantidad,
         viveres_activo:       e.viveres_activo,
         costo_despacho_zarpe: e.costo_despacho_zarpe,
         costo_despacho_arribo: e.costo_despacho_arribo,
@@ -2247,6 +2261,8 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           mob_demob_usd: 0, tarifa_dia_navegando: 0, tarifa_dia_operando: 0,
           precio_unitario: 0, m3_agua: 0, m3_slop: 0, drums_lubricante: 0,
           entregas_por_viaje: 1,
+          carga_ida: "lastre", carga_vuelta: "lastre",
+          camiones_cantidad: 0,
           viveres_activo: false,
           costo_despacho_zarpe:  puerto?.costo_despacho_zarpe  || puerto?.costo_despacho_operacion || 0,
           costo_despacho_arribo: puerto?.costo_despacho_arribo || puerto?.costo_despacho_operacion || 0,
@@ -2308,13 +2324,12 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const lubPct = (filaVel?.lubricante_pct||3)/100;
     const lubPtoPct = (barco.lubricante_pct_puerto||3)/100;
 
-    // Dirección de carga por tipo de servicio:
-    // alije:       ida lastre, vuelta lastre
-    // agua/lub:    ida carga (lleva producto), vuelta lastre
-    // slop:        ida lastre, vuelta carga (trae slop del buque)
-    const tipo = tipoServicio;
-    const cIda = (tipo === "agua" || tipo === "lubricantes") ? cCar : cLas;
-    const cVta = (tipo === "slop") ? cCar : cLas;
+    // Dirección de carga — configurable por escenario para agua/slop
+    // Para alije: siempre lastre. Para lubricantes: ida cargado, vuelta lastre (default)
+    const cargaIdaKey  = esc.carga_ida   || (tipoServicio === "lubricantes" ? "cargado" : tipoServicio === "alije" ? "lastre" : "lastre");
+    const cargaVtaKey  = esc.carga_vuelta|| (tipoServicio === "slop"        ? "cargado" : "lastre");
+    const cIda = cargaIdaKey  === "cargado" ? cCar : cLas;
+    const cVta = cargaVtaKey  === "cargado" ? cCar : cLas;
 
     const combAlist  = diasAlist  * cPto  * pvlsfo; const lubAlist  = diasAlist  * cPto  * lubPtoPct * plub;
     const combIda    = diasNavIda * cIda  * pvlsfo; const lubIda    = diasNavIda * cIda  * lubPct    * plub;
@@ -2345,7 +2360,12 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     const costoCompraAgua   = tipoServicio === "agua" ? m3Agua * (puerto.costo_agua_m3||0) : 0;
     const costoDescargaSlop = tipoServicio === "slop" ? m3Slop * (puerto.costo_slop_m3||0) : 0;
 
-    const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker+costoCompraAgua+costoDescargaSlop;
+    // Logística slop: camiones + izaje (estiba/op ya en costos op. variables) + disposición final
+    const costoCamiones      = tipoServicio === "slop" ? (esc.camiones_cantidad||0) * (puerto.costo_camion_unitario||0) : 0;
+    const costoDisposicion   = tipoServicio === "slop" ? m3Slop * (puerto.costo_disposicion_m3||0) : 0;
+
+    const costoOpVar = costoEstibaOp+costoEstibaHs+costoEstibaDia+costoEstibaTn+costoBunker
+                     +costoCompraAgua+costoDescargaSlop+costoCamiones+costoDisposicion;
 
     const totalCostos = totalComb+totalLub+costoTrip+costoViveres+costoZarpe+costoArribo+costoOpVar;
 
@@ -2369,7 +2389,7 @@ function TabServicio({ tipoServicio, titulo, icono }) {
       totalComb, totalLub, costoTrip,
       costoViveres, viveresDiaPers, costoZarpe, costoArribo, costoOpVar,
       costoEstibaOp, costoEstibaHs, costoEstibaDia, costoEstibaTn, costoBunker,
-      costoCompraAgua, costoDescargaSlop,
+      costoCompraAgua, costoDescargaSlop, costoCamiones, costoDisposicion,
       totalCostos, ingresoMD, ingresoZarpe,
       resultMD: ingresoMD - totalCostos, resultZarpe: ingresoZarpe - totalCostos,
       puerto,
@@ -2395,6 +2415,20 @@ function TabServicio({ tipoServicio, titulo, icono }) {
         <input className="field-input" type="number" min="0" value={e.operaciones_anio??0}
           onChange={ev => setField(key,"operaciones_anio",parseNum(ev.target.value))} />
     )},
+    ...((isAgua||isSlop) ? [
+      { label: "Carga ida", render: (e, key) => (
+          <select className="field-input" value={e.carga_ida||"lastre"} onChange={ev => setField(key,"carga_ida",ev.target.value)}>
+            <option value="lastre">Lastre</option>
+            <option value="cargado">Cargado</option>
+          </select>
+      )},
+      { label: "Carga vuelta", render: (e, key) => (
+          <select className="field-input" value={e.carga_vuelta||"lastre"} onChange={ev => setField(key,"carga_vuelta",ev.target.value)}>
+            <option value="lastre">Lastre</option>
+            <option value="cargado">Cargado</option>
+          </select>
+      )},
+    ] : []),
     ...(isAlije ? [
       { sec: "② Mob/Demob + día op." },
       { label: "Mob/Demob (USD/op)", render: (e, key) => (
@@ -2525,7 +2559,16 @@ function TabServicio({ tipoServicio, titulo, icono }) {
           </span>
         </div>
     ) : null },
-    { label: "TOTAL COSTOS",    calc: (d) => d ? fmtCompact(d.totalCostos) : "—", bold: true, red: true },
+    ...(isSlop ? [
+      { sec: "⑦ Logística slop" },
+      { label: "Camiones (cant.)", renderCalc: (e, key, d) => d ? (
+          <input className="field-input" type="number" min="0" value={e.camiones_cantidad??0}
+            onChange={ev => setField(key,"camiones_cantidad",parseNum(ev.target.value))} />
+      ) : null },
+      { label: "Flete camiones",    calc: (d) => d ? fmtCompact(d.costoCamiones)    : "—", red: true },
+      { label: "Disposición final", calc: (d) => d ? fmtCompact(d.costoDisposicion) : "—", red: true },
+    ] : []),
+    { label: "TOTAL COSTOS", calc: (d) => d ? fmtCompact(d.totalCostos) : "—", bold: true, red: true },
     { sec: "⑦ Resultado por operación" },
     { label: "Mob/Demob · por op.", calc: (d, e) => d ? `${fmtUSD(d.ingresoMD)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultMD)}` : "—", bold: true, result: true },
     ...(isAlije ? [
