@@ -2530,12 +2530,20 @@ function TabServicio({ tipoServicio, titulo, icono }) {
     { label: "Mob/Demob · por op.", calc: (d, e) => d ? `${fmtUSD(d.ingresoMD)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultMD)}` : "—", bold: true, result: true },
     ...(isAlije ? [
       { label: "Día zarpe · por op. *", calc: (d, e) => d ? `${fmtUSD(d.ingresoZarpe)} − ${fmtCompact(d.totalCostos)} = ${fmtCompact(d.resultZarpe)}` : "—", bold: true, result: true },
-      { sec: "⑧ Resultado anual (100% mercado)" },
+    { sec: "⑧ Resultado anual (100% mercado)" },
+    ...(isAlije ? [
       { label: "Mob/Demob · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoMD*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultMD*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
       { label: "Día zarpe · anual",   calc: (d, e) => d && e ? `${fmtCompact(d.ingresoZarpe*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultZarpe*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
     ] : [
-      { sec: "⑧ Resultado anual (100% mercado)" },
-      { label: "Anual", calc: (d, e) => d && e ? `${fmtCompact(d.ingresoMD*(e.operaciones_anio||0))} − ${fmtCompact(d.totalCostos*(e.operaciones_anio||0))} = ${fmtCompact(d.resultMD*(e.operaciones_anio||0))}` : "—", bold: true, result: true },
+      { label: "Anual", calc: (d, e) => {
+          if (!d || !e) return "—";
+          // Para agua/slop: operaciones_anio = entregas totales, viajes = entregas / entregas_por_viaje
+          const viajes = (e.operaciones_anio||0) / (e.entregas_por_viaje||1);
+          const ingAnual  = d.ingresoMD * viajes;
+          const costAnual = d.totalCostos * viajes;
+          const resAnual  = d.resultMD * viajes;
+          return `${fmtCompact(ingAnual)} − ${fmtCompact(costAnual)} = ${fmtCompact(resAnual)}`;
+      }, bold: true, result: true },
     ]),
   ];
 
@@ -2708,7 +2716,10 @@ function TabServicio({ tipoServicio, titulo, icono }) {
                         fontSize:8,color:"rgba(255,255,255,.45)",fontFamily:"var(--mono)",
                         letterSpacing:.3,
                       }}>
-                        {esc.operaciones_anio||0} op/año
+                        {esc.operaciones_anio||0} {(isAgua||isSlop) ? "entregas/año" : "op/año"}
+                        {(isAgua||isSlop) && (esc.entregas_por_viaje||1) !== 1 &&
+                          ` · ${((esc.operaciones_anio||0)/(esc.entregas_por_viaje||1)).toFixed(1)} viajes`
+                        }
                       </div>
                     </th>
                   );
